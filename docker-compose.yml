@@ -1,0 +1,91 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: session_reserve_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: sessionsecretpassword123
+      POSTGRES_DB: session_reserve
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: session_reserve_redis
+    restart: always
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: session_reserve_backend
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql://postgres:sessionsecretpassword123@postgres/session_reserve
+      - REDIS_URL=redis://redis:6379/0
+      - JWT_SECRET=supercomplexsessionjwtsecretkey987654321
+      - JWT_ALGORITHM=HS256
+      - MAX_WORKERS=5
+      - SCREENSHOTS_DIR=/app/shared/screenshots
+      - PROFILES_DIR=/app/shared/browser-profiles
+      - WORKER_HOST=worker
+    volumes:
+      - shared_data:/app/shared
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    container_name: session_reserve_worker
+    restart: always
+    ipc: host # Shared memory for Chromium stability
+    environment:
+      - DATABASE_URL=postgresql://postgres:sessionsecretpassword123@postgres/session_reserve
+      - REDIS_URL=redis://redis:6379/0
+      - MAX_WORKERS=5
+      - SCREENSHOTS_DIR=/app/shared/screenshots
+      - PROFILES_DIR=/app/shared/browser-profiles
+    volumes:
+      - shared_data:/app/shared
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  nginx:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    container_name: session_reserve_nginx
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    volumes:
+      - shared_data:/app/shared
+
+volumes:
+  postgres_data:
+  redis_data:
+  shared_data:
