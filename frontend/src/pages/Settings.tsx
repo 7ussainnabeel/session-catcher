@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { apiFetch, NotificationSettings } from '../utils/api';
-import { Loader2, Mail, Send, Sliders, Webhook, Check, Slack, HelpCircle } from 'lucide-react';
+import { Loader2, Mail, Send, Sliders, Webhook, Check, Slack } from 'lucide-react';
 
 export const Settings: React.FC = () => {
-  const [settings, setSettings] = useState<NotificationSettings | null>(null);
+  const [_settings, setSettings] = useState<NotificationSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
