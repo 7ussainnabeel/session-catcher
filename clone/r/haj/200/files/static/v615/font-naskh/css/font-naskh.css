@@ -1,0 +1,44 @@
+/* 
+@font-face {
+    font-family: 'droid_arabic_naskhbold';
+    src: url('../fonts/droidnaskh-bold-webfont.eot');
+    src: url('../fonts/droidnaskh-bold-webfont.eot?#iefix') format('embedded-opentype'),
+         url('../fonts/droidnaskh-bold-webfont.woff') format('woff'),
+         url('../fonts/droidnaskh-bold-webfont.ttf') format('truetype'),
+         url('../fonts/droidnaskh-bold-webfont.svg#droid_arabic_naskhbold') format('svg');
+    font-weight: bold;
+    font-style: normal;
+
+}
+@font-face {
+    font-family: 'droid_arabic_naskhregular';
+    src: url('../fonts/droidnaskh-regular-webfont.eot');
+    src: url('../fonts/droidnaskh-regular-webfont.eot?#iefix') format('embedded-opentype'),
+         url('../fonts/droidnaskh-regular-webfont.woff') format('woff'),
+         url('../fonts/droidnaskh-regular-webfont.ttf') format('truetype'),
+         url('../fonts/droidnaskh-regular-webfont.svg#droid_arabic_naskhregular') format('svg');
+    font-weight: normal;
+    font-style: normal;
+
+} */
+
+@font-face {
+  font-family: 'Droid Arabic Naskh';
+  font-style: normal;
+  font-weight: normal;
+  src: url(../fonts/DroidNaskh-Regular.eot);
+  src: url(../fonts/DroidNaskh-Regular.eot?#iefix) format('embedded-opentype'),
+       url(../fonts/DroidNaskh-Regular.woff2) format('woff2'),
+       url(../fonts/DroidNaskh-Regular.woff) format('woff'),
+       url(../fonts/DroidNaskh-Regular.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Droid Arabic Naskh';
+  font-style: normal;
+  font-weight: bold;
+  src: url(../fonts/DroidNaskh-Bold.eot);
+  src: url(../fonts/DroidNaskh-Bold.eot?#iefix) format('embedded-opentype'),
+       url(../fonts/DroidNaskh-Bold.woff2) format('woff2'),
+       url(../fonts/DroidNaskh-Bold.woff) format('woff'),
+       url(../fonts/DroidNaskh-Bold.ttf) format('truetype');
+}
