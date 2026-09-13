@@ -4,6 +4,9 @@ import socket
 import logging
 import requests
 import smtplib
+import html
+import re
+from urllib.parse import urlparse, parse_qs
 from email.mime.text import MIMEText
 from datetime import datetime
 from celery import Celery
@@ -12,10 +15,6 @@ import urllib.request
 import json
 
 # Setup DB imports (sharing the backend directory structure via volume or shared codebase)
-# Since they are built separately in Docker, the worker container will copy the db files.
-# We will copy models.py, database.py, crud.py into the worker directory via Dockerfile or write them directly.
-# Let's write helper modules or copy them inside the worker.
-# To keep the worker fully self-contained, we will import them. Let's make sure they are in the same folder structure.
 import database
 import models
 import crud
@@ -23,6 +22,10 @@ import crud
 # Initialize logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("session_reserve.worker")
+
+# Directories
+SCREENSHOTS_DIR = os.getenv("SCREENSHOTS_DIR", "/app/shared/screenshots")
+PROFILES_DIR = os.getenv("PROFILES_DIR", "/app/shared/browser-profiles")
 
 # Celery app
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
@@ -47,16 +50,90 @@ def get_browser_debugger_url(port: int) -> str:
         logger.error(f"Failed to fetch CDP webSocketDebuggerUrl: {e}")
     return ""
 
+def extract_session_info(captured_url: str, cookies: list) -> dict:
+    """
+    Extract session ID and relevant authentication cookies from the page URL and browser cookies.
+    """
+    session_id = None
+    try:
+        parsed = urlparse(captured_url)
+        params = parse_qs(parsed.query)
+        for key in ["session", "session_id", "sessionId", "token", "auth", "s", "sid", "app_session"]:
+            if key in params and params[key]:
+                session_id = params[key][0]
+                break
+    except Exception as e:
+        logger.error(f"Error parsing URL for session ID: {e}")
+
+    if not session_id:
+        match = re.search(r'(?:session|sessionId|sid|token)=([a-zA-Z0-9_\-\.]+)', captured_url, re.IGNORECASE)
+        if match:
+            session_id = match.group(1)
+
+    # Identify important session / auth cookies
+    session_cookies = []
+    for c in cookies:
+        name = c.get("name", "")
+        val = c.get("value", "")
+        if any(pat in name.lower() for pat in ["session", "token", "auth", "wwv", "ora_", "sid", "jwt", "login", "cookie"]):
+            session_cookies.append(f"{name}={val}")
+
+    return {
+        "session_id": session_id,
+        "session_cookies": session_cookies,
+        "all_cookies": [f"{c.get('name')}={c.get('value')}" for c in cookies]
+    }
+
 # --- NOTIFICATION UTILITIES ---
 
-def send_telegram_notification(bot_token: str, chat_id: str, text: str):
+def send_telegram_notification(bot_token: str, chat_id: str, text: str, photo_path: str = None, summary_caption: str = None):
+    """
+    Send notification to Telegram Bot. If photo_path is valid, send via sendPhoto with caption.
+    Falls back to sendMessage if photo upload fails or is not present.
+    """
+    photo_sent = False
+    if photo_path and os.path.isfile(photo_path):
+        try:
+            url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
+            caption = summary_caption or text
+            if len(caption) > 1024:
+                caption = caption[:1020] + "..."
+
+            with open(photo_path, "rb") as photo_file:
+                files = {"photo": (os.path.basename(photo_path), photo_file, "image/png")}
+                data = {"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"}
+                resp = requests.post(url, data=data, files=files, timeout=20)
+                if resp.status_code == 200:
+                    logger.info("Telegram photo notification sent successfully.")
+                    photo_sent = True
+                    # If caption was summarized, send full details as a follow-up text message
+                    if summary_caption and len(text) > len(caption):
+                        send_telegram_text(bot_token, chat_id, text)
+                        return
+                else:
+                    logger.warning(f"sendPhoto failed with status {resp.status_code}: {resp.text}. Falling back to sendMessage.")
+        except Exception as e:
+            logger.error(f"Failed to send Telegram photo: {e}. Falling back to sendMessage.")
+
+    if not photo_sent:
+        send_telegram_text(bot_token, chat_id, text)
+
+def send_telegram_text(bot_token: str, chat_id: str, text: str):
     try:
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-        payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
-        requests.post(url, json=payload, timeout=10)
-        logger.info("Telegram notification sent.")
+        if len(text) > 4096:
+            chunks = [text[i:i+4000] for i in range(0, len(text), 4000)]
+            for chunk in chunks:
+                payload = {"chat_id": chat_id, "text": chunk, "parse_mode": "HTML", "disable_web_page_preview": False}
+                requests.post(url, json=payload, timeout=15)
+        else:
+            payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": False}
+            resp = requests.post(url, json=payload, timeout=15)
+            if resp.status_code != 200:
+                logger.warning(f"sendMessage response code {resp.status_code}: {resp.text}")
+        logger.info("Telegram text notification dispatched.")
     except Exception as e:
-        logger.error(f"Failed to send Telegram notification: {e}")
+        logger.error(f"Failed to send Telegram text: {e}")
 
 def send_slack_notification(webhook_url: str, text: str):
     try:
@@ -75,17 +152,11 @@ def send_discord_notification(webhook_url: str, text: str):
         logger.error(f"Failed to send Discord notification: {e}")
 
 def send_email_notification(email_address: str, subject: str, body: str):
-    # Standard email dispatch code, using dynamic logs as fallback if SMTP settings are unset
     try:
         msg = MIMEText(body)
         msg['Subject'] = subject
         msg['From'] = 'noreply@sessionreserve.com'
         msg['To'] = email_address
-
-        # Mock/Optional local SMTP relay
-        # s = smtplib.SMTP('localhost')
-        # s.send_message(msg)
-        # s.quit()
         logger.info(f"Email notification dispatched to {email_address}: Subject: {subject}")
     except Exception as e:
         logger.error(f"Failed to dispatch email: {e}")
@@ -97,43 +168,124 @@ def send_webhook_notification(webhook_url: str, payload: dict):
     except Exception as e:
         logger.error(f"Failed to send Webhook: {e}")
 
-def dispatch_all_notifications(db, user_id: int, job_name: str, site_url: str, status_msg: str):
+def dispatch_all_notifications(
+    db, 
+    user_id: int, 
+    job_name: str, 
+    target_url: str, 
+    captured_url: str, 
+    status_msg: str, 
+    session_id: str = None, 
+    session_cookies: list = None, 
+    photo_path: str = None
+):
     settings = db.query(models.NotificationSettings).filter_by(user_id=user_id).first()
     if not settings:
         return
-        
-    subject = f"SUCCESS: Session Reserve alert for '{job_name}'"
-    text = (
-        f"🚨 <b>SUCCESS: Session Reserve Alert</b> 🚨\n\n"
-        f"<b>Job Name:</b> {job_name}\n"
-        f"<b>Website:</b> {site_url}\n"
-        f"<b>Status:</b> {status_msg}\n"
-        f"<b>Time:</b> {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}\n\n"
-        f"👉 Open your Dashboard to reconnect to this authenticated session."
+
+    now_str = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+    
+    # Prepare HTML safe strings for Telegram
+    safe_job_name = html.escape(job_name)
+    safe_target_url = html.escape(target_url)
+    safe_captured_url = html.escape(captured_url)
+    safe_session_id = html.escape(session_id) if session_id else "N/A"
+    safe_status = html.escape(status_msg)
+    
+    cookie_summary_lines = []
+    if session_cookies:
+        for ck in session_cookies[:4]:
+            cookie_summary_lines.append(html.escape(ck))
+        if len(session_cookies) > 4:
+            cookie_summary_lines.append(f"... (+{len(session_cookies)-4} more cookies)")
+    safe_cookies_block = "\n".join(cookie_summary_lines) if cookie_summary_lines else "None detected"
+
+    # Full Telegram HTML message
+    telegram_text = (
+        f"🚨 <b>SUCCESS: Session Caught & Reserved!</b> 🚨\n\n"
+        f"📋 <b>Job:</b> {safe_job_name}\n"
+        f"🌐 <b>Initial Target:</b> {safe_target_url}\n\n"
+        f"🎯 <b>Captured Session URL:</b>\n"
+        f"{safe_captured_url}\n\n"
+        f"🔑 <b>Session ID:</b> <code>{safe_session_id}</code>\n\n"
+        f"🍪 <b>Session Cookies:</b>\n"
+        f"<code>{safe_cookies_block}</code>\n\n"
+        f"📊 <b>Status:</b> {safe_status}\n"
+        f"⏰ <b>Time:</b> {now_str}\n\n"
+        f"👉 <i>Live browser session is reserved and running. Reconnect anytime via your Dashboard!</i>"
     )
     
+    # Condensed caption for photo if needed
+    telegram_summary_caption = (
+        f"🚨 <b>SUCCESS: Session Caught & Reserved!</b>\n\n"
+        f"📋 <b>Job:</b> {safe_job_name}\n"
+        f"🎯 <b>Session URL:</b>\n{safe_captured_url}\n"
+        f"🔑 <b>Session ID:</b> <code>{safe_session_id}</code>\n"
+        f"📊 <b>Status:</b> {safe_status}\n\n"
+        f"👉 <i>Check Dashboard to reconnect!</i>"
+    )
+
     # 1. Telegram
     if settings.telegram_enabled and settings.telegram_bot_token and settings.telegram_chat_id:
-        send_telegram_notification(settings.telegram_bot_token, settings.telegram_chat_id, text)
-        
+        send_telegram_notification(
+            bot_token=settings.telegram_bot_token,
+            chat_id=settings.telegram_chat_id,
+            text=telegram_text,
+            photo_path=photo_path,
+            summary_caption=telegram_summary_caption
+        )
+
     # 2. Slack
     if settings.slack_enabled and settings.slack_webhook_url:
-        send_slack_notification(settings.slack_webhook_url, text.replace("<b>", "*").replace("</b>", "*"))
-        
+        slack_text = (
+            f"🚨 *SUCCESS: Session Caught & Reserved!* 🚨\n\n"
+            f"*Job:* {job_name}\n"
+            f"*Captured URL:* {captured_url}\n"
+            f"*Session ID:* `{session_id or 'N/A'}`\n"
+            f"*Status:* {status_msg}\n"
+            f"*Time:* {now_str}\n"
+            f"👉 Open Dashboard to reconnect."
+        )
+        send_slack_notification(settings.slack_webhook_url, slack_text)
+
     # 3. Discord
     if settings.discord_enabled and settings.discord_webhook_url:
-        send_discord_notification(settings.discord_webhook_url, text.replace("<b>", "**").replace("</b>", "**"))
-        
+        discord_text = (
+            f"🚨 **SUCCESS: Session Caught & Reserved!** 🚨\n\n"
+            f"**Job:** {job_name}\n"
+            f"**Captured URL:** {captured_url}\n"
+            f"**Session ID:** `{session_id or 'N/A'}`\n"
+            f"**Status:** {status_msg}\n"
+            f"**Time:** {now_str}\n"
+            f"👉 Open Dashboard to reconnect."
+        )
+        send_discord_notification(settings.discord_webhook_url, discord_text)
+
     # 4. Email
     if settings.email_enabled and settings.email_address:
-        send_email_notification(settings.email_address, subject, text.replace("<b>", "").replace("</b>", "").replace("<br>", "\n"))
-        
+        email_subject = f"SUCCESS: Session Reserve alert for '{job_name}'"
+        email_body = (
+            f"Session Reserve Alert\n\n"
+            f"Job Name: {job_name}\n"
+            f"Target URL: {target_url}\n"
+            f"Captured URL: {captured_url}\n"
+            f"Session ID: {session_id or 'N/A'}\n"
+            f"Session Cookies: {', '.join(session_cookies) if session_cookies else 'None'}\n"
+            f"Status: {status_msg}\n"
+            f"Time: {now_str}\n\n"
+            f"Open your Dashboard to reconnect to this authenticated session."
+        )
+        send_email_notification(settings.email_address, email_subject, email_body)
+
     # 5. Webhook
     if settings.webhook_enabled and settings.webhook_url:
         payload = {
             "event": "success",
             "job_name": job_name,
-            "target_url": site_url,
+            "target_url": target_url,
+            "captured_url": captured_url,
+            "session_id": session_id,
+            "session_cookies": session_cookies,
             "status_message": status_msg,
             "timestamp": datetime.utcnow().isoformat()
         }
@@ -169,7 +321,7 @@ async def async_run_monitoring_job(job_id: int):
     db_worker.current_job_id = job_id
     db.commit()
     
-    profile_dir = os.path.join(os.getenv("PROFILES_DIR", "/app/shared/browser-profiles"), f"user_{user_id}")
+    profile_dir = os.path.join(PROFILES_DIR, f"user_{user_id}")
     os.makedirs(profile_dir, exist_ok=True)
     
     logger.info(f"Starting browser instance on port {cdp_port} for user {user_id}")
@@ -271,9 +423,18 @@ async def async_run_monitoring_job(job_id: int):
             # Update job state
             job.status = "success"
             
+            # Capture effective URL and cookies
+            captured_url = page.url
+            cookies = await browser_context.cookies()
+            session_data = extract_session_info(captured_url, cookies)
+            session_id_val = session_data.get("session_id")
+            session_cookies_val = session_data.get("session_cookies")
+            logger.info(f"Captured Session URL: {captured_url} | Session ID: {session_id_val}")
+            
             # Save screenshot
+            os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
             screenshot_filename = f"screenshot_job_{job_id}_{int(datetime.utcnow().timestamp())}.png"
-            screenshot_path = os.path.join(settings.SCREENSHOTS_DIR, screenshot_filename)
+            screenshot_path = os.path.join(SCREENSHOTS_DIR, screenshot_filename)
             await page.screenshot(path=screenshot_path)
             
             # Fetch WebSocket Debugger URL
@@ -294,16 +455,29 @@ async def async_run_monitoring_job(job_id: int):
             db_worker.browser_ws_url = cdp_ws_url
             db.commit()
             
+            log_detail = f"Session caught! URL: {captured_url}"
+            if session_id_val:
+                log_detail += f" (Session ID: {session_id_val})"
             crud.log_activity(
                 db, 
-                f"Monitoring success: {status_msg}. Browser reserved for remote interaction.", 
+                f"Monitoring success: {status_msg}. {log_detail}. Browser reserved for remote interaction.", 
                 "success", 
                 user_id=user_id, 
                 job_id=job_id
             )
             
-            # Dispatch notifications
-            dispatch_all_notifications(db, user_id, job.name, job.target_url, status_msg)
+            # Dispatch notifications to Telegram and other channels
+            dispatch_all_notifications(
+                db=db, 
+                user_id=user_id, 
+                job_name=job.name, 
+                target_url=job.target_url, 
+                captured_url=captured_url, 
+                status_msg=status_msg, 
+                session_id=session_id_val, 
+                session_cookies=session_cookies_val, 
+                photo_path=screenshot_path
+            )
             
             # Enter wait/hold loop - keep browser active and alive for user to connect
             logger.info("Entering hold loop. Browser is kept open...")

@@ -25,6 +25,40 @@ export const Settings: React.FC = () => {
   const [webhookEnabled, setWebhookEnabled] = useState(false);
   const [webhookUrl, setWebhookUrl] = useState('');
 
+  // Telegram test states
+  const [testingTg, setTestingTg] = useState(false);
+  const [tgFeedback, setTgFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const handleTestTelegram = async () => {
+    setTestingTg(true);
+    setTgFeedback(null);
+    try {
+      await apiFetch('/notifications/settings', {
+        method: 'PUT',
+        body: JSON.stringify({
+          email_enabled: emailEnabled,
+          email_address: emailAddress || null,
+          telegram_enabled: tgEnabled,
+          telegram_bot_token: tgToken || null,
+          telegram_chat_id: tgChatId || null,
+          discord_enabled: discordEnabled,
+          discord_webhook_url: discordWebhook || null,
+          slack_enabled: slackEnabled,
+          slack_webhook_url: slackWebhook || null,
+          webhook_enabled: webhookEnabled,
+          webhook_url: webhookUrl || null,
+        }),
+      });
+
+      const res = await apiFetch('/notifications/test-telegram', { method: 'POST' });
+      setTgFeedback({ type: 'success', message: res.message || 'Test alert delivered to Telegram!' });
+    } catch (err: any) {
+      setTgFeedback({ type: 'error', message: err.message || 'Failed to send test message' });
+    } finally {
+      setTestingTg(false);
+    }
+  };
+
   const fetchSettings = async () => {
     try {
       const data = await apiFetch('/notifications/settings');
@@ -157,28 +191,48 @@ export const Settings: React.FC = () => {
           </div>
 
           {tgEnabled && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-semibold text-zinc-400">Bot Token</label>
-                <input
-                  type="password"
-                  required
-                  value={tgToken}
-                  onChange={(e) => setTgToken(e.target.value)}
-                  placeholder="123456789:ABCdefGhI..."
-                  className="glass-input px-3 py-2 text-sm focus:outline-none"
-                />
+            <div className="space-y-3 pt-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-semibold text-zinc-400">Bot Token</label>
+                  <input
+                    type="password"
+                    required
+                    value={tgToken}
+                    onChange={(e) => setTgToken(e.target.value)}
+                    placeholder="123456789:ABCdefGhI..."
+                    className="glass-input px-3 py-2 text-sm focus:outline-none"
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-semibold text-zinc-400">Chat ID</label>
+                  <input
+                    type="text"
+                    required
+                    value={tgChatId}
+                    onChange={(e) => setTgChatId(e.target.value)}
+                    placeholder="987654321"
+                    className="glass-input px-3 py-2 text-sm focus:outline-none"
+                  />
+                </div>
               </div>
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-semibold text-zinc-400">Chat ID</label>
-                <input
-                  type="text"
-                  required
-                  value={tgChatId}
-                  onChange={(e) => setTgChatId(e.target.value)}
-                  placeholder="987654321"
-                  className="glass-input px-3 py-2 text-sm focus:outline-none"
-                />
+
+              <div className="flex flex-wrap items-center gap-3 pt-1">
+                <button
+                  type="button"
+                  disabled={testingTg || !tgToken || !tgChatId}
+                  onClick={handleTestTelegram}
+                  className="px-3 py-1.5 rounded-lg border border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 text-xs font-semibold flex items-center gap-1.5 transition-all disabled:opacity-40"
+                >
+                  {testingTg ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+                  Test Telegram Chatbot
+                </button>
+
+                {tgFeedback && (
+                  <span className={`text-xs font-medium ${tgFeedback.type === 'success' ? 'text-green-400' : 'text-red-400'}`}>
+                    {tgFeedback.message}
+                  </span>
+                )}
               </div>
             </div>
           )}

