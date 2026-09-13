@@ -43,8 +43,11 @@ services:
       - SCREENSHOTS_DIR=/app/shared/screenshots
       - PROFILES_DIR=/app/shared/browser-profiles
       - WORKER_HOST=worker
+    ports:
+      - "8000:8000"
     volumes:
       - shared_data:/app/shared
+      - ./clone:/app/clone:ro
     depends_on:
       postgres:
         condition: service_healthy

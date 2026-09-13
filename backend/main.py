@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from datetime import timedelta
+from typing import Optional, List, Dict, Any
 import os
 import psutil
 import json
@@ -54,6 +55,10 @@ app.add_middleware(
 
 # Serve screenshots static files
 app.mount("/api/screenshots", StaticFiles(directory=settings.SCREENSHOTS_DIR), name="screenshots")
+
+# Serve mock clone of portal if present
+if os.path.isdir("/app/clone"):
+    app.mount("/portal-mock", StaticFiles(directory="/app/clone", html=True), name="portal_mock")
 
 # --- AUTH ENDPOINTS ---
 
@@ -379,7 +384,7 @@ async def ws_dashboard(websocket: WebSocket, token: str = None, db: Session = De
 
 
 @app.websocket("/api/ws/browser/{job_id}")
-async def ws_browser(websocket: WebSocket, token: str = None, db: Session = Depends(get_db)):
+async def ws_browser(websocket: WebSocket, job_id: int, token: str = None, db: Session = Depends(get_db)):
     # Authenticate socket
     if not token:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
@@ -414,12 +419,17 @@ async def ws_browser(websocket: WebSocket, token: str = None, db: Session = Depe
     # Tunnel to Chromium browser CDP
     # The active_session.cdp_ws_url is inside the worker container
     # Since they run on the same network, worker is accessible by 'worker' host.
-    # The URL looks like ws://127.0.0.1:PORT/devtools/browser/... or similar.
-    # Replace 127.0.0.1/localhost inside cdp_ws_url with worker service host name
+    # Resolve to IP address to satisfy Chromium's DevTools Host header security check
+    import socket
+    try:
+        worker_target = socket.gethostbyname(settings.WORKER_HOST)
+    except Exception:
+        worker_target = settings.WORKER_HOST
+
     cdp_url = active_session.cdp_ws_url
     if "127.0.0.1" in cdp_url:
-        cdp_url = cdp_url.replace("127.0.0.1", settings.WORKER_HOST)
+        cdp_url = cdp_url.replace("127.0.0.1", worker_target)
     elif "localhost" in cdp_url:
-        cdp_url = cdp_url.replace("localhost", settings.WORKER_HOST)
+        cdp_url = cdp_url.replace("localhost", worker_target)
         
     await CDPProxyManager.proxy_cdp(websocket, cdp_url)

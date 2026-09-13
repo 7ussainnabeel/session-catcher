@@ -334,6 +334,7 @@ async def async_run_monitoring_job(job_id: int):
             headless=True,
             args=[
                 f"--remote-debugging-port={cdp_port}",
+                "--remote-debugging-address=0.0.0.0",
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",

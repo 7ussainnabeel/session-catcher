@@ -10,6 +10,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/database.py ./database.py
 COPY backend/models.py ./models.py
 COPY backend/crud.py ./crud.py
+COPY backend/schemas.py ./schemas.py
 COPY worker/worker.py ./worker.py
 
 # Env variables for Playwright

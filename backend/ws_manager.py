@@ -51,8 +51,8 @@ class CDPProxyManager:
         logger.info(f"Connecting proxy to browser CDP: {browser_ws_url}")
         
         try:
-            # Connect to Chromium debugger websocket
-            async with websockets.connect(browser_ws_url, max_size=10*1024*1024) as browser_ws:
+            # Connect to Chromium debugger websocket with Host header to pass security checks
+            async with websockets.connect(browser_ws_url, max_size=10*1024*1024, additional_headers={"Host": "localhost"}) as browser_ws:
                 logger.info("Successfully connected to Chromium CDP. Starting bidirectional pipe.")
                 
                 # Forward client (React) -> browser (Chromium)
