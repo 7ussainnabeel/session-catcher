@@ -335,180 +335,190 @@ async def async_run_monitoring_job(job_id: int):
             args=[
                 f"--remote-debugging-port={cdp_port}",
                 "--remote-debugging-address=0.0.0.0",
+                "--remote-allow-origins=*",
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
-                "--disable-gpu"
+                "--disable-gpu",
+                "--disable-breakpad",
+                "--no-first-run",
+                "--mute-audio",
+                "--disable-background-networking"
             ]
         )
         
-        db_worker.status = "monitoring"
-        db.commit()
-        
-        # Verify page
-        page = browser_context.pages[0] if browser_context.pages else await browser_context.new_page()
-        
-        retries = 0
-        success = False
-        status_msg = ""
-        
-        crud.log_activity(db, f"Browser initialized on port {cdp_port}. Monitoring started.", "info", user_id=user_id, job_id=job_id)
-        
-        while retries < job.max_retries:
-            # Check if job was paused/deleted by client
-            db.refresh(job)
-            if job.status != "active":
-                logger.info(f"Job {job_id} is no longer active (status={job.status}). Exiting.")
-                status_msg = "Job paused/stopped by user"
-                break
-                
-            try:
-                logger.info(f"Navigating to {job.target_url} (Attempt {retries+1}/{job.max_retries})")
-                response = await page.goto(job.target_url, timeout=job.timeout * 1000)
-                
-                # Evaluate conditions
-                conditions_met = []
-                
-                if job.expected_http_response is not None:
-                    status_match = response.status == job.expected_http_response
-                    conditions_met.append(status_match)
-                    logger.info(f"HTTP Response check: {response.status} vs {job.expected_http_response} (Match: {status_match})")
-                    
-                if job.expected_title:
-                    title = await page.title()
-                    title_match = job.expected_title in title
-                    conditions_met.append(title_match)
-                    logger.info(f"Title check: '{title}' containing '{job.expected_title}' (Match: {title_match})")
-                    
-                if job.expected_url:
-                    url_match = job.expected_url in page.url
-                    conditions_met.append(url_match)
-                    logger.info(f"URL check: '{page.url}' containing '{job.expected_url}' (Match: {url_match})")
-                    
-                if job.expected_text:
-                    body_text = await page.inner_text("body")
-                    text_match = job.expected_text in body_text
-                    conditions_met.append(text_match)
-                    logger.info(f"Text check: body containing '{job.expected_text}' (Match: {text_match})")
-                    
-                if job.expected_element:
-                    el_visible = await page.locator(job.expected_element).is_visible()
-                    conditions_met.append(el_visible)
-                    logger.info(f"Element check: locator '{job.expected_element}' visible (Match: {el_visible})")
-                    
-                if job.expected_button:
-                    btn_enabled = await page.locator(job.expected_button).is_enabled()
-                    conditions_met.append(btn_enabled)
-                    logger.info(f"Button check: locator '{job.expected_button}' enabled (Match: {btn_enabled})")
-
-                # If we have conditions and all of them (or any, depending on design) match:
-                # We require ALL specified conditions to match for strict verification
-                if conditions_met and all(conditions_met):
-                    success = True
-                    status_msg = "All expected targets matched"
-                    break
-                    
-            except Exception as e:
-                logger.error(f"Exception during monitoring tick: {e}")
-                retries += 1
-                if retries >= job.max_retries:
-                    status_msg = f"Failed after maximum retries: {str(e)}"
-                    break
-                    
-            await asyncio.sleep(job.refresh_interval)
-            
-        # Post-loop checks
-        if success:
-            logger.info("Success conditions met! Freezing browser session...")
-            
-            # Update job state
-            job.status = "success"
-            
-            # Capture effective URL and cookies
-            captured_url = page.url
-            cookies = await browser_context.cookies()
-            session_data = extract_session_info(captured_url, cookies)
-            session_id_val = session_data.get("session_id")
-            session_cookies_val = session_data.get("session_cookies")
-            logger.info(f"Captured Session URL: {captured_url} | Session ID: {session_id_val}")
-            
-            # Save screenshot
-            os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
-            screenshot_filename = f"screenshot_job_{job_id}_{int(datetime.utcnow().timestamp())}.png"
-            screenshot_path = os.path.join(SCREENSHOTS_DIR, screenshot_filename)
-            await page.screenshot(path=screenshot_path)
-            
-            # Fetch WebSocket Debugger URL
-            cdp_ws_url = get_browser_debugger_url(cdp_port)
-            logger.info(f"CDP WebSocket debugger URL: {cdp_ws_url}")
-            
-            # Create interactive Session record in DB
-            db_session = crud.create_session(
-                db=db,
-                user_id=user_id,
-                job_id=job_id,
-                worker_id=db_worker.id,
-                cdp_ws_url=cdp_ws_url
-            )
-            db_session.screenshot_path = f"/api/screenshots/{screenshot_filename}"
-            
-            db_worker.status = "reserved"
-            db_worker.browser_ws_url = cdp_ws_url
+        try:
+            db_worker.status = "monitoring"
             db.commit()
             
-            log_detail = f"Session caught! URL: {captured_url}"
-            if session_id_val:
-                log_detail += f" (Session ID: {session_id_val})"
-            crud.log_activity(
-                db, 
-                f"Monitoring success: {status_msg}. {log_detail}. Browser reserved for remote interaction.", 
-                "success", 
-                user_id=user_id, 
-                job_id=job_id
-            )
+            # Verify page
+            page = browser_context.pages[0] if browser_context.pages else await browser_context.new_page()
             
-            # Dispatch notifications to Telegram and other channels
-            dispatch_all_notifications(
-                db=db, 
-                user_id=user_id, 
-                job_name=job.name, 
-                target_url=job.target_url, 
-                captured_url=captured_url, 
-                status_msg=status_msg, 
-                session_id=session_id_val, 
-                session_cookies=session_cookies_val, 
-                photo_path=screenshot_path
-            )
+            retries = 0
+            success = False
+            status_msg = ""
             
-            # Enter wait/hold loop - keep browser active and alive for user to connect
-            logger.info("Entering hold loop. Browser is kept open...")
-            while True:
-                db.refresh(db_session)
+            crud.log_activity(db, f"Browser initialized on port {cdp_port}. Monitoring started.", "info", user_id=user_id, job_id=job_id)
+            
+            while retries < job.max_retries:
+                # Check if job was paused/deleted by client
                 db.refresh(job)
-                if db_session.status != "active" or job.status != "success":
-                    logger.info("Session closed by server/user. Tearing down browser...")
+                if job.status != "active":
+                    logger.info(f"Job {job_id} is no longer active (status={job.status}). Exiting.")
+                    status_msg = "Job paused/stopped by user"
                     break
-                await asyncio.sleep(5)
+                    
+                try:
+                    logger.info(f"Navigating to {job.target_url} (Attempt {retries+1}/{job.max_retries})")
+                    response = await page.goto(job.target_url, timeout=job.timeout * 1000)
+                    
+                    # Evaluate conditions
+                    conditions_met = []
+                    
+                    if job.expected_http_response is not None:
+                        status_match = response.status == job.expected_http_response
+                        conditions_met.append(status_match)
+                        logger.info(f"HTTP Response check: {response.status} vs {job.expected_http_response} (Match: {status_match})")
+                        
+                    if job.expected_title:
+                        title = await page.title()
+                        title_match = job.expected_title in title
+                        conditions_met.append(title_match)
+                        logger.info(f"Title check: '{title}' containing '{job.expected_title}' (Match: {title_match})")
+                        
+                    if job.expected_url:
+                        url_match = job.expected_url in page.url
+                        conditions_met.append(url_match)
+                        logger.info(f"URL check: '{page.url}' containing '{job.expected_url}' (Match: {url_match})")
+                        
+                    if job.expected_text:
+                        body_text = await page.inner_text("body")
+                        text_match = job.expected_text in body_text
+                        conditions_met.append(text_match)
+                        logger.info(f"Text check: body containing '{job.expected_text}' (Match: {text_match})")
+                        
+                    if job.expected_element:
+                        el_visible = await page.locator(job.expected_element).is_visible()
+                        conditions_met.append(el_visible)
+                        logger.info(f"Element check: locator '{job.expected_element}' visible (Match: {el_visible})")
+                        
+                    if job.expected_button:
+                        btn_enabled = await page.locator(job.expected_button).is_enabled()
+                        conditions_met.append(btn_enabled)
+                        logger.info(f"Button check: locator '{job.expected_button}' enabled (Match: {btn_enabled})")
+
+                    if conditions_met and all(conditions_met):
+                        success = True
+                        status_msg = "All expected targets matched"
+                        break
+                        
+                except Exception as e:
+                    logger.error(f"Exception during monitoring tick: {e}")
+                    retries += 1
+                    if retries >= job.max_retries:
+                        status_msg = f"Failed after maximum retries: {str(e)}"
+                        break
+                        
+                await asyncio.sleep(job.refresh_interval)
                 
-        else:
-            # Job finished with failure/limit reached
-            logger.info(f"Monitoring ended without success: {status_msg}")
-            job.status = "failed"
-            crud.log_activity(db, f"Monitoring ended: {status_msg}", "error", user_id=user_id, job_id=job_id)
-            
-        # Cleanup browser resources
-        logger.info("Closing browser context...")
-        await browser_context.close()
-        
-        # Reset worker status
-        db_worker.status = "finished"
-        db_worker.current_job_id = None
-        db_worker.browser_ws_url = None
-        db.commit()
-        
-        # Remove worker registration or mark available
-        db_worker.status = "available"
-        db.commit()
-        
-        logger.info("Browser closed and worker returned to pool.")
-        db.close()
+            # Post-loop checks
+            if success:
+                logger.info("Success conditions met! Freezing browser session...")
+                
+                # Update job state
+                job.status = "success"
+                
+                # Capture effective URL and cookies
+                captured_url = page.url
+                cookies = await browser_context.cookies()
+                session_data = extract_session_info(captured_url, cookies)
+                session_id_val = session_data.get("session_id")
+                session_cookies_val = session_data.get("session_cookies")
+                logger.info(f"Captured Session URL: {captured_url} | Session ID: {session_id_val}")
+                
+                # Save screenshot
+                os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
+                screenshot_filename = f"screenshot_job_{job_id}_{int(datetime.utcnow().timestamp())}.png"
+                screenshot_path = os.path.join(SCREENSHOTS_DIR, screenshot_filename)
+                await page.screenshot(path=screenshot_path)
+                
+                # Fetch WebSocket Debugger URL
+                cdp_ws_url = get_browser_debugger_url(cdp_port)
+                logger.info(f"CDP WebSocket debugger URL: {cdp_ws_url}")
+                
+                # Create interactive Session record in DB
+                db_session = crud.create_session(
+                    db=db,
+                    user_id=user_id,
+                    job_id=job_id,
+                    worker_id=db_worker.id,
+                    cdp_ws_url=cdp_ws_url
+                )
+                db_session.screenshot_path = f"/api/screenshots/{screenshot_filename}"
+                
+                db_worker.status = "reserved"
+                db_worker.browser_ws_url = cdp_ws_url
+                db.commit()
+                
+                log_detail = f"Session caught! URL: {captured_url}"
+                if session_id_val:
+                    log_detail += f" (Session ID: {session_id_val})"
+                crud.log_activity(
+                    db, 
+                    f"Monitoring success: {status_msg}. {log_detail}. Browser reserved for remote interaction.", 
+                    "success", 
+                    user_id=user_id, 
+                    job_id=job_id
+                )
+                
+                # Dispatch notifications to Telegram and other channels
+                dispatch_all_notifications(
+                    db=db, 
+                    user_id=user_id, 
+                    job_name=job.name, 
+                    target_url=job.target_url, 
+                    captured_url=captured_url, 
+                    status_msg=status_msg, 
+                    session_id=session_id_val, 
+                    session_cookies=session_cookies_val, 
+                    photo_path=screenshot_path
+                )
+                
+                # Enter wait/hold loop - keep browser active and alive for user to connect
+                logger.info("Entering hold loop. Browser is kept open...")
+                while True:
+                    db.refresh(db_session)
+                    db.refresh(job)
+                    if db_session.status != "active" or job.status != "success":
+                        logger.info("Session closed by server/user. Tearing down browser...")
+                        break
+                    await asyncio.sleep(5)
+                    
+            else:
+                # Job finished with failure/limit reached
+                logger.info(f"Monitoring ended without success: {status_msg}")
+                job.status = "failed"
+                crud.log_activity(db, f"Monitoring ended: {status_msg}", "error", user_id=user_id, job_id=job_id)
+
+        except Exception as exc:
+            logger.error(f"Critical unhandled error in monitoring job {job_id}: {exc}", exc_info=True)
+            crud.log_activity(db, f"Monitoring aborted unexpectedly: {str(exc)}", "error", user_id=user_id, job_id=job_id)
+            raise
+        finally:
+            # Unconditional cleanup of browser context & worker pool release
+            try:
+                logger.info("Closing browser context in finally block...")
+                await browser_context.close()
+            except Exception as e:
+                logger.warning(f"Error closing browser context: {e}")
+
+            try:
+                db_worker.status = "available"
+                db_worker.current_job_id = None
+                db_worker.browser_ws_url = None
+                db.commit()
+            except Exception as e:
+                logger.warning(f"Error resetting worker status: {e}")
+            finally:
+                db.close()
+                logger.info("Browser closed and worker returned to available pool.")

@@ -1,18 +1,22 @@
-from fastapi import FastAPI, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Depends, HTTPException, status, WebSocket, WebSocketDisconnect, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
-from datetime import timedelta
+from sqlalchemy import text
+from datetime import timedelta, datetime
 from typing import Optional, List, Dict, Any
+from contextlib import asynccontextmanager
 import os
 import psutil
 import json
 import logging
+import redis
 
 import models
 import schemas
 import crud
-from database import engine, get_db
+from database import engine, get_db, init_db_with_retry
 from auth import (
     create_access_token,
     create_refresh_token,
@@ -25,33 +29,52 @@ from ws_manager import dashboard_ws_manager, CDPProxyManager
 from celery_app import celery_app
 from config import settings
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
+# Setup structured logging
+log_level = getattr(logging, settings.LOG_LEVEL, logging.INFO)
+logging.basicConfig(
+    level=log_level,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
 logger = logging.getLogger("session_reserve.api")
 
-# Create database tables
-models.Base.metadata.create_all(bind=engine)
-
-# Create system screenshots directory if not exist
-os.makedirs(settings.SCREENSHOTS_DIR, exist_ok=True)
-os.makedirs(settings.PROFILES_DIR, exist_ok=True)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup tasks
+    logger.info(f"Starting Session Reserve in {settings.ENVIRONMENT} mode...")
+    os.makedirs(settings.SCREENSHOTS_DIR, exist_ok=True)
+    os.makedirs(settings.PROFILES_DIR, exist_ok=True)
+    init_db_with_retry(max_retries=15, delay=2)
+    logger.info("Application startup sequence completed successfully.")
+    yield
+    # Shutdown tasks
+    logger.info("Application shutting down...")
 
 app = FastAPI(
     title="Session Reserve API",
     description="Backend API for managing browser authentication sessions and monitoring jobs.",
     version="1.0.0",
-    docs_url="/api/docs",
-    openapi_url="/api/openapi.json"
+    docs_url="/api/docs" if settings.ENVIRONMENT != "production_strict" else None,
+    openapi_url="/api/openapi.json" if settings.ENVIRONMENT != "production_strict" else None,
+    lifespan=lifespan
 )
 
 # CORS Middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Global Production Exception Handler
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled error on {request.method} {request.url.path}: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "An internal server error occurred. Please contact administrator."}
+    )
 
 # Serve screenshots static files
 app.mount("/api/screenshots", StaticFiles(directory=settings.SCREENSHOTS_DIR), name="screenshots")
@@ -59,6 +82,57 @@ app.mount("/api/screenshots", StaticFiles(directory=settings.SCREENSHOTS_DIR), n
 # Serve mock clone of portal if present
 if os.path.isdir("/app/clone"):
     app.mount("/portal-mock", StaticFiles(directory="/app/clone", html=True), name="portal_mock")
+
+# --- HEALTH CHECK ENDPOINT ---
+
+@app.get("/api/health")
+def health_check(db: Session = Depends(get_db)):
+    """Production health check for Docker, load balancers, and uptime monitors."""
+    health = {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "environment": settings.ENVIRONMENT,
+        "services": {
+            "database": "unknown",
+            "redis": "unknown"
+        }
+    }
+    status_code = status.HTTP_200_OK
+
+    # Check Database
+    try:
+        db.execute(text("SELECT 1"))
+        health["services"]["database"] = "up"
+    except Exception as e:
+        health["services"]["database"] = f"down: {str(e)}"
+        health["status"] = "unhealthy"
+        status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+
+    # Check Redis
+    try:
+        r = redis.Redis.from_url(settings.REDIS_URL, socket_timeout=3)
+        if r.ping():
+            health["services"]["redis"] = "up"
+        else:
+            health["services"]["redis"] = "down"
+            health["status"] = "unhealthy"
+            status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    except Exception as e:
+        health["services"]["redis"] = f"down: {str(e)}"
+        health["status"] = "unhealthy"
+        status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+
+    # System load
+    health["system"] = {
+        "cpu_percent": psutil.cpu_percent(),
+        "memory_percent": psutil.virtual_memory().percent
+    }
+
+    return Response(
+        content=json.dumps(health),
+        status_code=status_code,
+        media_type="application/json"
+    )
 
 # --- AUTH ENDPOINTS ---
 
