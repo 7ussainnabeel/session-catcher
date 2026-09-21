@@ -7,6 +7,10 @@ from sqlalchemy import text
 from datetime import timedelta, datetime
 from typing import Optional, List, Dict, Any
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse, urlunparse
+import asyncio
+import socket
+import urllib.request
 import os
 import psutil
 import json
@@ -475,21 +479,58 @@ async def ws_browser(websocket: WebSocket, job_id: int, token: str = None, db: S
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
     
-    # Fetch active session and check permissions
+    # Fetch job and check permissions
     db_job = crud.get_job(db, job_id)
     if not db_job or (db_job.user_id != user.id and user.role != "admin"):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
     
-    # Retrieve browser WS debug URL
-    active_session = crud.get_active_session_by_job(db, job_id)
-    if not active_session or not active_session.cdp_ws_url:
-        # Check if worker is active and has a debugging URL directly
-        # Sometimes worker registers browser WS url directly on the job/worker
-        # Try to fallback
-        logger.error(f"No active session found for job {job_id}")
+    # Retrieve browser WS debug URL:
+    # 1. Check active reserved session first
+    # 2. If not found, check active worker running this monitoring job
+    cdp_url = None
+    active_session = None
+    
+    for attempt in range(10): # Wait up to 5s if worker is just starting up
+        db.expire_all()
+        active_session = crud.get_active_session_by_job(db, job_id)
+        if active_session and active_session.cdp_ws_url:
+            cdp_url = active_session.cdp_ws_url
+            break
+            
+        worker = db.query(models.Worker).filter(models.Worker.current_job_id == job_id).first()
+        if worker and worker.browser_ws_url:
+            cdp_url = worker.browser_ws_url
+            break
+        elif worker and worker.port:
+            # Try to query worker debugger endpoint directly
+            try:
+                import urllib.request
+                import json as py_json
+                query_host = worker.host or settings.WORKER_HOST or "worker"
+                url = f"http://{query_host}:{worker.port}/json"
+                req = urllib.request.Request(url, headers={"Host": "localhost"})
+                with urllib.request.urlopen(req, timeout=1.5) as resp:
+                    targets = py_json.loads(resp.read().decode())
+                    for t in targets:
+                        if t.get("type") == "page":
+                            cdp_url = t.get("webSocketDebuggerUrl")
+                            worker.browser_ws_url = cdp_url
+                            db.commit()
+                            break
+                if cdp_url:
+                    break
+            except Exception:
+                pass
+                
+        if db_job.status not in ["active", "success"]:
+            break
+        await asyncio.sleep(0.5)
+
+    if not cdp_url:
+        logger.error(f"No active CDP debug session found for job {job_id}")
         await websocket.accept()
-        await websocket.send_json({"error": "No active remote session available. Verify that the job is RESERVED."})
+        await websocket.send_json({"error": "No active remote browser available. Verify that the job is Monitoring or Reserved."})
         await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
         return
         
@@ -497,26 +538,28 @@ async def ws_browser(websocket: WebSocket, job_id: int, token: str = None, db: S
     await websocket.accept()
     
     # Tunnel to Chromium browser CDP
-    # The active_session.cdp_ws_url is inside the worker container
-    # Since they run on the same network, worker is accessible by 'worker' host.
     # Resolve to IP address to satisfy Chromium's DevTools Host header security check
     import socket
+    from urllib.parse import urlparse, urlunparse
     try:
         worker_target = socket.gethostbyname(settings.WORKER_HOST)
     except Exception:
         worker_target = settings.WORKER_HOST
 
-    cdp_url = active_session.cdp_ws_url
-    if "127.0.0.1" in cdp_url:
-        cdp_url = cdp_url.replace("127.0.0.1", worker_target)
-    elif "localhost" in cdp_url:
-        cdp_url = cdp_url.replace("localhost", worker_target)
+    try:
+        parsed = urlparse(cdp_url)
+        port = parsed.port or 9222
+        netloc = f"{worker_target}:{port}"
+        cdp_url = urlunparse((parsed.scheme or "ws", netloc, parsed.path, parsed.params, parsed.query, parsed.fragment))
+    except Exception as e:
+        logger.warning(f"Error parsing CDP URL {cdp_url}: {e}")
         
     try:
         await CDPProxyManager.proxy_cdp(websocket, cdp_url)
     except Exception as e:
-        logger.error(f"CDP connection failed for job {job_id} (Session {active_session.id}): {e}")
-        active_session.status = "closed"
-        active_session.closed_at = datetime.utcnow()
-        db.commit()
-        crud.log_activity(db, f"CDP session {active_session.id} for job {job_id} closed due to connection drop: {e}", "warning", user_id=user.id, job_id=job_id)
+        logger.error(f"CDP connection ended for job {job_id}: {e}")
+        if active_session:
+            active_session.status = "closed"
+            active_session.closed_at = datetime.utcnow()
+            db.commit()
+            crud.log_activity(db, f"CDP session {active_session.id} for job {job_id} closed: {e}", "warning", user_id=user.id, job_id=job_id)

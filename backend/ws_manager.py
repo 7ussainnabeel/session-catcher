@@ -50,50 +50,61 @@ class CDPProxyManager:
         """
         logger.info(f"Connecting proxy to browser CDP: {browser_ws_url}")
         
+        headers = {"Host": "localhost"}
+        connect_kwargs = {
+            "max_size": 32 * 1024 * 1024,
+            "ping_interval": 20,
+            "ping_timeout": 20
+        }
+        
+        # Connect to Chromium debugger websocket with Host header to pass security checks
+        # Handles compatibility across different python websockets versions
+        browser_ws = None
         try:
-            # Connect to Chromium debugger websocket with Host header to pass security checks
-            async with websockets.connect(browser_ws_url, max_size=10*1024*1024, additional_headers={"Host": "localhost"}) as browser_ws:
-                logger.info("Successfully connected to Chromium CDP. Starting bidirectional pipe.")
+            try:
+                browser_ws = await websockets.connect(browser_ws_url, extra_headers=headers, **connect_kwargs)
+            except TypeError:
+                browser_ws = await websockets.connect(browser_ws_url, additional_headers=headers, **connect_kwargs)
                 
-                # Forward client (React) -> browser (Chromium)
-                async def forward_to_browser():
-                    try:
-                        while True:
-                            # Read data from React client
-                            client_data = await client_ws.receive_text()
-                            # Parse JSON to verify, and forward to CDP
-                            await browser_ws.send(client_data)
-                    except asyncio.CancelledError:
-                        pass
-                    except Exception as e:
-                        logger.error(f"CDP Proxy: client -> browser exception: {e}")
+            logger.info("Successfully connected to Chromium CDP. Starting bidirectional pipe.")
+            
+            # Forward client (React) -> browser (Chromium)
+            async def forward_to_browser():
+                try:
+                    while True:
+                        # Read data from React client
+                        client_data = await client_ws.receive_text()
+                        await browser_ws.send(client_data)
+                except asyncio.CancelledError:
+                    pass
+                except Exception as e:
+                    logger.debug(f"CDP Proxy: client -> browser finished: {e}")
 
-                # Forward browser (Chromium) -> client (React)
-                async def forward_to_client():
-                    try:
-                        while True:
-                            # Read data from Chromium CDP
-                            browser_data = await browser_ws.recv()
-                            # Send data to React client
-                            await client_ws.send_text(str(browser_data))
-                    except asyncio.CancelledError:
-                        pass
-                    except Exception as e:
-                        logger.error(f"CDP Proxy: browser -> client exception: {e}")
+            # Forward browser (Chromium) -> client (React)
+            async def forward_to_client():
+                try:
+                    while True:
+                        # Read data from Chromium CDP
+                        browser_data = await browser_ws.recv()
+                        await client_ws.send_text(str(browser_data))
+                except asyncio.CancelledError:
+                    pass
+                except Exception as e:
+                    logger.debug(f"CDP Proxy: browser -> client finished: {e}")
 
-                # Run both tasks concurrently
-                forward_task_1 = asyncio.create_task(forward_to_browser())
-                forward_task_2 = asyncio.create_task(forward_to_client())
+            # Run both tasks concurrently
+            forward_task_1 = asyncio.create_task(forward_to_browser())
+            forward_task_2 = asyncio.create_task(forward_to_client())
+            
+            # Wait until one task terminates
+            done, pending = await asyncio.wait(
+                [forward_task_1, forward_task_2],
+                return_when=asyncio.FIRST_COMPLETED
+            )
+            
+            for task in pending:
+                task.cancel()
                 
-                # Wait until one task terminates
-                done, pending = await asyncio.wait(
-                    [forward_task_1, forward_task_2],
-                    return_when=asyncio.FIRST_COMPLETED
-                )
-                
-                for task in pending:
-                    task.cancel()
-                    
         except Exception as e:
             logger.error(f"Failed to establish or maintain CDP websocket connection: {e}")
             try:
@@ -101,3 +112,9 @@ class CDPProxyManager:
             except Exception:
                 pass
             raise
+        finally:
+            if browser_ws and not browser_ws.closed:
+                try:
+                    await browser_ws.close()
+                except Exception:
+                    pass

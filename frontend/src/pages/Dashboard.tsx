@@ -25,19 +25,46 @@ export const Dashboard: React.FC = () => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [activeJobId, setActiveJobId] = useState<number | null>(null);
   
-  // Create Job Form State
-  const [jobName, setJobName] = useState('');
-  const [targetUrl, setTargetUrl] = useState('');
-  const [interval, setIntervalVal] = useState(30);
-  const [expectedText, setExpectedText] = useState('');
-  const [expectedElement, setExpectedElement] = useState('');
-  const [expectedTitle, setExpectedTitle] = useState('');
-  const [expectedUrl, setExpectedUrl] = useState('');
-  const [expectedStatus, setExpectedStatus] = useState<number | ''>('');
-  const [maxRetries, setMaxRetries] = useState(10);
-  const [timeout, setTimeoutVal] = useState(30);
+  // Recommended Default Job Configuration
+  const DEFAULT_JOB_CONFIG = {
+    name: 'Hajj Platform Registration',
+    targetUrl: 'https://haj.gov.bh/ords/r/haj/hajj_platform/home',
+    interval: 15,
+    maxRetries: 100,
+    timeout: 30,
+    expectedText: '',
+    expectedElement: '#btn_register',
+    expectedTitle: 'منصة الحج',
+    expectedUrl: '',
+    expectedStatus: '' as number | '',
+  };
+
+  // Create Job Form State with Recommended Defaults
+  const [jobName, setJobName] = useState(DEFAULT_JOB_CONFIG.name);
+  const [targetUrl, setTargetUrl] = useState(DEFAULT_JOB_CONFIG.targetUrl);
+  const [interval, setIntervalVal] = useState(DEFAULT_JOB_CONFIG.interval);
+  const [expectedText, setExpectedText] = useState(DEFAULT_JOB_CONFIG.expectedText);
+  const [expectedElement, setExpectedElement] = useState(DEFAULT_JOB_CONFIG.expectedElement);
+  const [expectedTitle, setExpectedTitle] = useState(DEFAULT_JOB_CONFIG.expectedTitle);
+  const [expectedUrl, setExpectedUrl] = useState(DEFAULT_JOB_CONFIG.expectedUrl);
+  const [expectedStatus, setExpectedStatus] = useState<number | ''>(DEFAULT_JOB_CONFIG.expectedStatus);
+  const [maxRetries, setMaxRetries] = useState(DEFAULT_JOB_CONFIG.maxRetries);
+  const [timeout, setTimeoutVal] = useState(DEFAULT_JOB_CONFIG.timeout);
   const [creating, setCreating] = useState(false);
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
+
+  const resetToRecommendedDefaults = () => {
+    setJobName(DEFAULT_JOB_CONFIG.name);
+    setTargetUrl(DEFAULT_JOB_CONFIG.targetUrl);
+    setIntervalVal(DEFAULT_JOB_CONFIG.interval);
+    setMaxRetries(DEFAULT_JOB_CONFIG.maxRetries);
+    setTimeoutVal(DEFAULT_JOB_CONFIG.timeout);
+    setExpectedText(DEFAULT_JOB_CONFIG.expectedText);
+    setExpectedElement(DEFAULT_JOB_CONFIG.expectedElement);
+    setExpectedTitle(DEFAULT_JOB_CONFIG.expectedTitle);
+    setExpectedUrl(DEFAULT_JOB_CONFIG.expectedUrl);
+    setExpectedStatus(DEFAULT_JOB_CONFIG.expectedStatus);
+  };
 
   const fetchDashboardData = async () => {
     try {
@@ -99,14 +126,7 @@ export const Dashboard: React.FC = () => {
         }),
       });
       setShowCreateModal(false);
-      // Reset form
-      setJobName('');
-      setTargetUrl('');
-      setExpectedText('');
-      setExpectedElement('');
-      setExpectedTitle('');
-      setExpectedUrl('');
-      setExpectedStatus('');
+      resetToRecommendedDefaults();
       fetchDashboardData();
     } catch (err: any) {
       alert(err.message || 'Failed to create job');
@@ -158,7 +178,10 @@ export const Dashboard: React.FC = () => {
         </div>
         
         <button
-          onClick={() => setShowCreateModal(true)}
+          onClick={() => {
+            resetToRecommendedDefaults();
+            setShowCreateModal(true);
+          }}
           className="glass-button px-4 py-2.5 flex items-center justify-center gap-2 text-sm"
         >
           <Plus size={16} />
@@ -256,14 +279,25 @@ export const Dashboard: React.FC = () => {
                           Monitor
                         </button>
                       ) : job.status === 'active' ? (
-                        <button
-                          disabled={actionLoadingId === job.id}
-                          onClick={() => handleJobAction(job.id, 'pause')}
-                          className="px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-xs font-semibold flex items-center gap-1 transition-all"
-                        >
-                          <Pause size={12} />
-                          Pause
-                        </button>
+                        <>
+                          {/* LIVE VIEW WHILE MONITORING */}
+                          <button
+                            onClick={() => setActiveJobId(job.id)}
+                            className="px-2.5 py-1.5 rounded-lg bg-blue-600/90 hover:bg-blue-500 text-white text-xs font-semibold flex items-center gap-1 transition-all shadow-md shadow-blue-900/20"
+                            title="View live browser stream while monitoring"
+                          >
+                            <Eye size={12} />
+                            Live View
+                          </button>
+                          <button
+                            disabled={actionLoadingId === job.id}
+                            onClick={() => handleJobAction(job.id, 'pause')}
+                            className="px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-xs font-semibold flex items-center gap-1 transition-all"
+                          >
+                            <Pause size={12} />
+                            Pause
+                          </button>
+                        </>
                       ) : null}
 
                       {/* RECONNECT: If successful match occurs, connect to the browser */}
@@ -271,7 +305,7 @@ export const Dashboard: React.FC = () => {
                         <>
                           <button
                             onClick={() => setActiveJobId(job.id)}
-                            className="px-2.5 py-1.5 rounded-lg bg-green-600 hover:bg-green-500 text-white text-xs font-semibold flex items-center gap-1 transition-all shadow-md shadow-green-900/20"
+                            className="px-2.5 py-1.5 rounded-lg bg-green-600 hover:bg-green-500 text-white text-xs font-semibold flex items-center gap-1 transition-all shadow-md shadow-green-900/20 animate-pulse"
                           >
                             <Eye size={12} />
                             Reconnect
@@ -391,7 +425,7 @@ export const Dashboard: React.FC = () => {
                     required
                     value={jobName}
                     onChange={(e) => setJobName(e.target.value)}
-                    placeholder="My Target Ticket Page"
+                    placeholder="Hajj Platform Registration"
                     className="glass-input px-3 py-2 text-sm focus:outline-none"
                   />
                 </div>
@@ -403,7 +437,7 @@ export const Dashboard: React.FC = () => {
                     required
                     value={targetUrl}
                     onChange={(e) => setTargetUrl(e.target.value)}
-                    placeholder="https://example.com/tickets"
+                    placeholder="https://haj.gov.bh/ords/r/haj/hajj_platform/home"
                     className="glass-input px-3 py-2 text-sm focus:outline-none"
                   />
                 </div>
@@ -446,7 +480,7 @@ export const Dashboard: React.FC = () => {
               </div>
 
               <hr className="border-zinc-800" />
-              <p className="text-xs font-bold text-zinc-300">Match Criteria (Any checked fields will be evaluated)</p>
+              <p className="text-xs font-bold text-zinc-300">Match Criteria (Evaluated against page when live)</p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="flex flex-col gap-1">
@@ -455,7 +489,7 @@ export const Dashboard: React.FC = () => {
                     type="text"
                     value={expectedText}
                     onChange={(e) => setExpectedText(e.target.value)}
-                    placeholder="Available, Buy Now, In Stock"
+                    placeholder="بدء التسجيل or التسجيل متاح"
                     className="glass-input px-3 py-2 text-sm focus:outline-none"
                   />
                 </div>
@@ -466,7 +500,7 @@ export const Dashboard: React.FC = () => {
                     type="text"
                     value={expectedElement}
                     onChange={(e) => setExpectedElement(e.target.value)}
-                    placeholder=".purchase-btn-active, #buy-now"
+                    placeholder="#btn_register or button.t-Button--hot"
                     className="glass-input px-3 py-2 text-sm focus:outline-none"
                   />
                 </div>
@@ -477,7 +511,7 @@ export const Dashboard: React.FC = () => {
                     type="text"
                     value={expectedTitle}
                     onChange={(e) => setExpectedTitle(e.target.value)}
-                    placeholder="Ticket Details | Booking"
+                    placeholder="منصة الحج"
                     className="glass-input px-3 py-2 text-sm focus:outline-none"
                   />
                 </div>
@@ -531,6 +565,7 @@ export const Dashboard: React.FC = () => {
       {activeJobId !== null && (
         <BrowserViewer
           jobId={activeJobId}
+          jobName={jobs.find((j) => j.id === activeJobId)?.name}
           onClose={() => {
             setActiveJobId(null);
             fetchDashboardData();

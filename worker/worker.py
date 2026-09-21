@@ -348,17 +348,26 @@ async def async_run_monitoring_job(job_id: int):
         )
         
         try:
+            # Immediately register the browser debugger URL on the worker so live canvas is viewable during monitoring
+            cdp_ws_url = get_browser_debugger_url(cdp_port)
             db_worker.status = "monitoring"
+            db_worker.browser_ws_url = cdp_ws_url
             db.commit()
             
             # Verify page
             page = browser_context.pages[0] if browser_context.pages else await browser_context.new_page()
             
+            # Re-verify and refresh debugger URL once page is ensured
+            if not cdp_ws_url:
+                cdp_ws_url = get_browser_debugger_url(cdp_port)
+                db_worker.browser_ws_url = cdp_ws_url
+                db.commit()
+            
             retries = 0
             success = False
             status_msg = ""
             
-            crud.log_activity(db, f"Browser initialized on port {cdp_port}. Monitoring started.", "info", user_id=user_id, job_id=job_id)
+            crud.log_activity(db, f"Browser initialized on port {cdp_port}. Monitoring started (CDP: {cdp_ws_url}).", "info", user_id=user_id, job_id=job_id)
             
             while retries < job.max_retries:
                 # Check if job was paused/deleted by client
