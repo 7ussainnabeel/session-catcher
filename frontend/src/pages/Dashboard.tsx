@@ -256,9 +256,9 @@ export const Dashboard: React.FC = () => {
                       {/* SETUP BUTTON: Open browser to log in manually before monitoring */}
                       {job.status === 'paused' && (
                         <button
-                          onClick={() => {
+                          onClick={async () => {
                             // First trigger starting the container for manual session
-                            handleJobAction(job.id, 'start');
+                            await handleJobAction(job.id, 'start');
                             setActiveJobId(job.id);
                           }}
                           className="px-2.5 py-1.5 rounded-lg border border-zinc-700 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 text-xs font-semibold flex items-center gap-1 transition-all"

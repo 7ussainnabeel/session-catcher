@@ -48,6 +48,15 @@ async def lifespan(app: FastAPI):
     os.makedirs(settings.SCREENSHOTS_DIR, exist_ok=True)
     os.makedirs(settings.PROFILES_DIR, exist_ok=True)
     init_db_with_retry(max_retries=15, delay=2)
+    
+    # Clean up stale worker records from previous container runs
+    try:
+        db = next(get_db())
+        db.query(models.Worker).update({"status": "available", "current_job_id": None, "browser_ws_url": None})
+        db.commit()
+    except Exception as e:
+        logger.warning(f"Error resetting stale workers on startup: {e}")
+        
     logger.info("Application startup sequence completed successfully.")
     yield
     # Shutdown tasks
@@ -484,14 +493,22 @@ async def ws_browser(websocket: WebSocket, job_id: int, token: str = None, db: S
     if not db_job or (db_job.user_id != user.id and user.role != "admin"):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
+        
+    # Accept the client websocket connection first so connection is established
+    await websocket.accept()
     
-    # Retrieve browser WS debug URL:
-    # 1. Check active reserved session first
-    # 2. If not found, check active worker running this monitoring job
+    # If job is active or setup requested, but no worker is currently running, auto-dispatch Celery task
+    worker = db.query(models.Worker).filter(models.Worker.current_job_id == job_id, models.Worker.status.in_(["assigned", "monitoring", "reserved"])).first()
+    if not worker and db_job.status in ["active", "paused"]:
+        if db_job.status == "paused":
+            crud.update_monitoring_job(db, job_id, schemas.MonitoringJobUpdate(status="active"))
+        celery_app.send_task("worker.run_monitoring_job", args=[job_id])
+    
+    # Retrieve browser WS debug URL
     cdp_url = None
     active_session = None
     
-    for attempt in range(10): # Wait up to 5s if worker is just starting up
+    for attempt in range(20): # Wait up to 10s for browser to initialize
         db.expire_all()
         active_session = crud.get_active_session_by_job(db, job_id)
         if active_session and active_session.cdp_ws_url:
@@ -503,44 +520,35 @@ async def ws_browser(websocket: WebSocket, job_id: int, token: str = None, db: S
             cdp_url = worker.browser_ws_url
             break
         elif worker and worker.port:
-            # Try to query worker debugger endpoint directly
             try:
-                import urllib.request
-                import json as py_json
                 query_host = worker.host or settings.WORKER_HOST or "worker"
                 url = f"http://{query_host}:{worker.port}/json"
                 req = urllib.request.Request(url, headers={"Host": "localhost"})
                 with urllib.request.urlopen(req, timeout=1.5) as resp:
-                    targets = py_json.loads(resp.read().decode())
+                    targets = json.loads(resp.read().decode())
                     for t in targets:
-                        if t.get("type") == "page":
+                        if t.get("type") == "page" and t.get("webSocketDebuggerUrl"):
                             cdp_url = t.get("webSocketDebuggerUrl")
                             worker.browser_ws_url = cdp_url
                             db.commit()
                             break
+                        elif t.get("webSocketDebuggerUrl"):
+                            cdp_url = t.get("webSocketDebuggerUrl")
                 if cdp_url:
                     break
             except Exception:
                 pass
                 
-        if db_job.status not in ["active", "success"]:
-            break
         await asyncio.sleep(0.5)
 
     if not cdp_url:
         logger.error(f"No active CDP debug session found for job {job_id}")
-        await websocket.accept()
-        await websocket.send_json({"error": "No active remote browser available. Verify that the job is Monitoring or Reserved."})
-        await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
+        await websocket.send_json({"error": "Browser is starting up. Please click Live View again in a few seconds."})
+        await websocket.close(code=status.WS_1000_NORMAL_CLOSURE)
         return
-        
-    # Accept the client websocket connection first
-    await websocket.accept()
     
     # Tunnel to Chromium browser CDP
     # Resolve to IP address to satisfy Chromium's DevTools Host header security check
-    import socket
-    from urllib.parse import urlparse, urlunparse
     try:
         worker_target = socket.gethostbyname(settings.WORKER_HOST)
     except Exception:

@@ -36,18 +36,26 @@ def find_free_port() -> int:
         s.bind(('', 0))
         return s.getsockname()[1]
 
-def get_browser_debugger_url(port: int) -> str:
-    """Fetch the DevTools WebSocket URL by querying the local browser debug port."""
-    try:
-        url = f"http://localhost:{port}/json"
-        response = urllib.request.urlopen(url, timeout=5)
-        data = json.loads(response.read().decode())
-        # Find type == 'page' target
-        for target in data:
-            if target.get("type") == "page":
-                return target.get("webSocketDebuggerUrl")
-    except Exception as e:
-        logger.error(f"Failed to fetch CDP webSocketDebuggerUrl: {e}")
+def get_browser_debugger_url(port: int, max_retries: int = 15, delay: float = 0.3) -> str:
+    """Fetch the DevTools WebSocket URL by querying the local browser debug port with retries."""
+    import time
+    for _ in range(max_retries):
+        try:
+            url = f"http://127.0.0.1:{port}/json"
+            req = urllib.request.Request(url, headers={"Host": "localhost"})
+            with urllib.request.urlopen(req, timeout=3) as response:
+                data = json.loads(response.read().decode())
+                # Prefer target of type 'page'
+                for target in data:
+                    if target.get("type") == "page" and target.get("webSocketDebuggerUrl"):
+                        return target.get("webSocketDebuggerUrl")
+                # Fallback to any target with a debugger URL
+                for target in data:
+                    if target.get("webSocketDebuggerUrl"):
+                        return target.get("webSocketDebuggerUrl")
+        except Exception as e:
+            logger.debug(f"Waiting for CDP debugger on port {port}: {e}")
+        time.sleep(delay)
     return ""
 
 def extract_session_info(captured_url: str, cookies: list) -> dict:
