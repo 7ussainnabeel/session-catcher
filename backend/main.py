@@ -264,13 +264,19 @@ def stop_job(job_id: int, current_user: models.User = Depends(get_current_user),
     if not db_job or db_job.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Job not found")
     
-    crud.update_monitoring_job(db, job_id, schemas.MonitoringJobUpdate(status="finished"))
+    crud.update_monitoring_job(db, job_id, schemas.MonitoringJobUpdate(status="paused"))
     
-    # Close any active session
-    active_session = crud.get_active_session_by_job(db, job_id)
-    if active_session:
-        active_session.status = "closed"
-        db.commit()
+    # Close all active sessions for this job
+    db.query(models.Session).filter(
+        models.Session.job_id == job_id,
+        models.Session.status == "active"
+    ).update({"status": "closed", "closed_at": datetime.utcnow()})
+    
+    # Release any worker allocated to this job
+    db.query(models.Worker).filter(
+        models.Worker.current_job_id == job_id
+    ).update({"status": "available", "current_job_id": None, "browser_ws_url": None})
+    db.commit()
         
     crud.log_activity(db, f"Job session stopped and closed: {db_job.name}", "info", user_id=current_user.id, job_id=job_id)
     return {"message": "Monitoring job stopped and browser closed"}
@@ -506,4 +512,11 @@ async def ws_browser(websocket: WebSocket, job_id: int, token: str = None, db: S
     elif "localhost" in cdp_url:
         cdp_url = cdp_url.replace("localhost", worker_target)
         
-    await CDPProxyManager.proxy_cdp(websocket, cdp_url)
+    try:
+        await CDPProxyManager.proxy_cdp(websocket, cdp_url)
+    except Exception as e:
+        logger.error(f"CDP connection failed for job {job_id} (Session {active_session.id}): {e}")
+        active_session.status = "closed"
+        active_session.closed_at = datetime.utcnow()
+        db.commit()
+        crud.log_activity(db, f"CDP session {active_session.id} for job {job_id} closed due to connection drop: {e}", "warning", user_id=user.id, job_id=job_id)

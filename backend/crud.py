@@ -189,6 +189,12 @@ def get_worker(db: Session, worker_id: int):
 
 # --- Sessions CRUD ---
 def create_session(db: Session, user_id: int, job_id: int, worker_id: int, cdp_ws_url: str):
+    # Close any existing active sessions for this job to prevent stale accumulation
+    db.query(models.Session).filter(
+        models.Session.job_id == job_id,
+        models.Session.status == "active"
+    ).update({"status": "closed", "closed_at": datetime.utcnow()})
+    
     db_session = models.Session(
         user_id=user_id,
         job_id=job_id,
@@ -202,8 +208,19 @@ def create_session(db: Session, user_id: int, job_id: int, worker_id: int, cdp_w
     db.refresh(db_session)
     return db_session
 
+def close_session(db: Session, session_id: int):
+    db_session = db.query(models.Session).filter(models.Session.id == session_id).first()
+    if db_session:
+        db_session.status = "closed"
+        db_session.closed_at = datetime.utcnow()
+        db.commit()
+    return db_session
+
 def get_active_session_by_job(db: Session, job_id: int):
-    return db.query(models.Session).filter(models.Session.job_id == job_id, models.Session.status == "active").first()
+    return db.query(models.Session).filter(
+        models.Session.job_id == job_id,
+        models.Session.status == "active"
+    ).order_by(desc(models.Session.id)).first()
 
 def get_sessions_by_user(db: Session, user_id: int):
     return db.query(models.Session).filter(models.Session.user_id == user_id).order_by(desc(models.Session.created_at)).all()

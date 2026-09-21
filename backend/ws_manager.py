@@ -100,3 +100,4 @@ class CDPProxyManager:
                 await client_ws.send_json({"error": f"Failed to connect to browser CDP: {str(e)}"})
             except Exception:
                 pass
+            raise

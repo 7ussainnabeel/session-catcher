@@ -158,3 +158,40 @@ ORA_WWV_APP_200=ORA_WWV-ATzdNHHQIi7dZy2vFg3nZt9K...
 - [ ] **Avoid F5 Refresh Spamming**: Repeatedly refreshing an Oracle APEX page under load destroys server-side database cursor allocations and pushes you to the back of the ORDS connection pool. Let each request finish.
 - [ ] **Single Active Session**: Do not open multiple tabs on the same browser for APEX applications; concurrent requests on the same session cookie cause **Session State Protection (SSP)** checksum mismatches.
 - [ ] **Run on a Stable Network / VPS**: Running the worker on a server or VPS provides lower network latency and higher uptime compared to home Wi-Fi.
+
+---
+
+## 5. Production Deployment & Architecture
+
+Session Reserve is fully containerized with a hardened 5-service production stack:
+- **`nginx`**: Reverse proxy, SSL termination, static SPA caching (1-year immutable for `/assets/`), gzip compression, rate-limiting (10 req/min for auth, 30 req/sec for general API), and WebSocket upgrades.
+- **`backend`**: FastAPI running under **Gunicorn** with multiple **UvicornWorker** processes, connection pooling, exponential backoff database startup, and health metrics.
+- **`worker`**: Celery + headless Chromium Playwright worker with 2GB shared memory (`shm_size`), unconditional browser context cleanup via `try...finally`, and defensive timeout handling.
+- **`postgres`**: PostgreSQL 16 database with persisted volume and health checks.
+- **`redis`**: Redis 7 cache with LRU eviction and append-only file persistence.
+
+### Starting the Production Stack
+
+```bash
+# 1. Ensure .env is populated (see .env.example)
+cp .env.example .env
+
+# 2. Start all services in the background
+docker compose up -d
+
+# 3. Check health status of all 5 containers
+docker compose ps
+```
+
+### Health Monitoring Endpoints
+
+| Endpoint | Protocol | Description | Expected Output |
+| :--- | :--- | :--- | :--- |
+| `/healthz` | HTTP GET | Nginx proxy liveness probe | `healthy` (`200 OK`) |
+| `/api/health` | HTTP GET | Deep backend health (Postgres + Redis + CPU/RAM) | `{"status": "healthy", "services": {"database": "up", "redis": "up"}}` |
+
+### Default Admin Credentials
+
+- **Email**: `admin@sessionreserve.com`
+- **Password**: `AdminSecurePass2026!`
+
