@@ -92,10 +92,6 @@ async def global_exception_handler(request: Request, exc: Exception):
 # Serve screenshots static files
 app.mount("/api/screenshots", StaticFiles(directory=settings.SCREENSHOTS_DIR), name="screenshots")
 
-# Serve mock clone of portal if present
-if os.path.isdir("/app/clone"):
-    app.mount("/portal-mock", StaticFiles(directory="/app/clone", html=True), name="portal_mock")
-
 # --- HEALTH CHECK ENDPOINT ---
 
 @app.get("/api/health")

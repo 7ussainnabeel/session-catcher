@@ -83,7 +83,7 @@ def extract_session_info(captured_url: str, cookies: list) -> dict:
     for c in cookies:
         name = c.get("name", "")
         val = c.get("value", "")
-        if any(pat in name.lower() for pat in ["session", "token", "auth", "wwv", "ora_", "sid", "jwt", "login", "cookie"]):
+        if any(pat in name.lower() for pat in ["session", "token", "auth", "wwv", "ora_", "sid", "jwt", "login", "cookie", "ekey", "next", "user", "account"]):
             session_cookies.append(f"{name}={val}")
 
     return {

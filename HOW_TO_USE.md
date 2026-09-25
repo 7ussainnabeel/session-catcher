@@ -76,17 +76,23 @@ In the **Dashboard**, click **New Monitoring Job**:
 | Field | Recommended Value | Why |
 | :--- | :--- | :--- |
 | **Job Name** | `Hajj Platform Registration` | Descriptive label for logs and notifications. |
-| **Target URL** | `https://haj.gov.bh/ords/r/haj/hajj_platform/home` | Do **not** use an expired session ID (`?session=...`) because Oracle APEX redirects invalid sessions and issues a new dynamic one. |
+| **Target URL** | `https://haj.gov.bh/home` | The official portal home page. |
 | **Check Interval** | `15` to `30` seconds | Frequencies below 10 seconds risk triggering Nginx/WAF rate limiting (`HTTP 429` / IP bans). |
 | **Max Retries** | `100` (or higher) | Keeps monitoring running continuously until the portal opens. |
 | **Page Timeout** | `30` seconds | Allows sufficient time for heavy server responses under load. |
 
 #### Match Criteria (Choose the most specific condition):
 
-* **Expected Text**: Specific text that only appears when registration goes live (e.g., `بدء التسجيل` or `التسجيل متاح`).
-* **Expected Element**: CSS selector of the active registration button (e.g., `button.t-Button--hot`, `#btn_register`, or `a[href*="register"]`).
-* **Expected Title**: `منصة الحج` (matches the verified page `<title>`).
+* **Expected Text**: Specific text that only appears when registration goes live (e.g., `تقديم طلب التسجيل` or `بدء التسجيل`).
+* **Expected Element**: CSS selector of the active registration button (e.g., `a[href*="/register"]`, `a[href*="/register/bahraini"]`, or `.registration-menu`).
+* **Expected Title**: `نظام تسجيل الحج` (matches the verified page `<title>`).
 * **Expected HTTP Response**: `200`.
+
+#### Pre-Login / Authenticated Session Setup:
+1. Click **Setup Login** (or **Live View**) on the job card to launch the browser profile.
+2. Complete your eKey login on the portal (`https://haj.gov.bh/home`).
+3. Your authenticated session and tokens persist in the user profile directory.
+4. Click **Monitor** to start automated monitoring while remaining logged in.
 
 Click **Save Job**, then click **Monitor** to start the worker.
 
@@ -96,14 +102,14 @@ Click **Save Job**, then click **Monitor** to start the worker.
 
 Once started, the background Celery worker handles everything:
 
-1. **Persistent Context**: Launches Chromium with a persistent user profile (`/app/shared/browser-profiles/user_<id>`).
-2. **Evaluation**: Navigates to the portal at your configured interval and evaluates the DOM against your criteria.
+1. **Persistent Context**: Launches Chromium with a persistent user profile (`/app/shared/browser-profiles/user_<id>`), ensuring your logged-in session, eKey credentials, and cookies are preserved.
+2. **Evaluation**: Navigates to `https://haj.gov.bh/home` at your configured interval and evaluates the DOM against your criteria.
 3. **The Freeze**: As soon as the condition is satisfied:
    * The worker **does not close or navigate away**.
-   * It enters a persistent **hold loop**, keeping the Chromium browser window open and active in memory.
+   * It enters a persistent **hold loop**, keeping the Chromium browser window open and active in memory on `https://haj.gov.bh/home`.
    * It saves a full-page screenshot (`screenshot_job_<id>_<timestamp>.png`).
-   * It parses `page.url` to extract the dynamically assigned Oracle APEX session parameter (`?session=...`).
-   * It extracts active authentication cookies (including `ORA_WWV_APP_...`).
+   * It parses `page.url` to extract any dynamically assigned session parameters.
+   * It extracts active authentication and session cookies.
 
 ---
 
@@ -117,18 +123,18 @@ Within 1–2 seconds of detection, your Telegram bot sends:
 🚨 SUCCESS: Session Caught & Reserved! 🚨
 
 📋 Job: Hajj Platform Registration
-🌐 Initial Target: https://haj.gov.bh/ords/r/haj/hajj_platform/home
+🌐 Initial Target: https://haj.gov.bh/home
 
 🎯 Captured Session URL:
-https://haj.gov.bh/ords/r/haj/hajj_platform/home?session=16731417367592
+https://haj.gov.bh/home
 
-🔑 Session ID: 16731417367592
+🔑 Session ID: N/A (Authenticated Cookies Active)
 
 🍪 Session Cookies:
-ORA_WWV_APP_200=ORA_WWV-ATzdNHHQIi7dZy2vFg3nZt9K...
+auth_token=...
 
 📊 Status: All expected targets matched
-⏰ Time: 2026-09-14 01:20:00 UTC
+⏰ Time: 2026-09-25 10:00:00 UTC
 
 👉 Live browser session is reserved and running. Reconnect anytime via your Dashboard!
 ```

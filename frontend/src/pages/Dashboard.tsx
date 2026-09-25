@@ -28,13 +28,13 @@ export const Dashboard: React.FC = () => {
   // Recommended Default Job Configuration
   const DEFAULT_JOB_CONFIG = {
     name: 'Hajj Platform Registration',
-    targetUrl: 'https://haj.gov.bh/ords/r/haj/hajj_platform/home',
+    targetUrl: 'https://haj.gov.bh/home',
     interval: 15,
     maxRetries: 100,
     timeout: 30,
     expectedText: '',
-    expectedElement: '#btn_register',
-    expectedTitle: 'منصة الحج',
+    expectedElement: 'a[href*="/register"]',
+    expectedTitle: 'نظام تسجيل الحج',
     expectedUrl: '',
     expectedStatus: '' as number | '',
   };
@@ -437,7 +437,7 @@ export const Dashboard: React.FC = () => {
                     required
                     value={targetUrl}
                     onChange={(e) => setTargetUrl(e.target.value)}
-                    placeholder="https://haj.gov.bh/ords/r/haj/hajj_platform/home"
+                    placeholder="https://haj.gov.bh/home"
                     className="glass-input px-3 py-2 text-sm focus:outline-none"
                   />
                 </div>
@@ -489,7 +489,7 @@ export const Dashboard: React.FC = () => {
                     type="text"
                     value={expectedText}
                     onChange={(e) => setExpectedText(e.target.value)}
-                    placeholder="بدء التسجيل or التسجيل متاح"
+                    placeholder="تقديم طلب التسجيل or بدء التسجيل"
                     className="glass-input px-3 py-2 text-sm focus:outline-none"
                   />
                 </div>
@@ -500,7 +500,7 @@ export const Dashboard: React.FC = () => {
                     type="text"
                     value={expectedElement}
                     onChange={(e) => setExpectedElement(e.target.value)}
-                    placeholder="#btn_register or button.t-Button--hot"
+                    placeholder="a[href*='/register'] or .registration-menu"
                     className="glass-input px-3 py-2 text-sm focus:outline-none"
                   />
                 </div>
@@ -511,7 +511,7 @@ export const Dashboard: React.FC = () => {
                     type="text"
                     value={expectedTitle}
                     onChange={(e) => setExpectedTitle(e.target.value)}
-                    placeholder="منصة الحج"
+                    placeholder="نظام تسجيل الحج"
                     className="glass-input px-3 py-2 text-sm focus:outline-none"
                   />
                 </div>
