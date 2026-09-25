@@ -62,6 +62,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
+      - ./backend:/app
       - shared_data:/app/shared
       - ./hajj-session-queue-assistant:/app/hajj-session-queue-assistant:ro
     depends_on:

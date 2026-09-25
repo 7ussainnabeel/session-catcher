@@ -62,9 +62,9 @@ class CDPProxyManager:
         browser_ws = None
         try:
             try:
-                browser_ws = await websockets.connect(browser_ws_url, extra_headers=headers, **connect_kwargs)
-            except TypeError:
                 browser_ws = await websockets.connect(browser_ws_url, additional_headers=headers, **connect_kwargs)
+            except TypeError:
+                browser_ws = await websockets.connect(browser_ws_url, extra_headers=headers, **connect_kwargs)
                 
             logger.info("Successfully connected to Chromium CDP. Starting bidirectional pipe.")
             

@@ -51,14 +51,7 @@ async def lifespan(app: FastAPI):
     os.makedirs(settings.PROFILES_DIR, exist_ok=True)
     init_db_with_retry(max_retries=15, delay=2)
     
-    # Clean up stale worker records from previous container runs
-    try:
-        db = next(get_db())
-        db.query(models.Worker).update({"status": "available", "current_job_id": None, "browser_ws_url": None})
-        db.commit()
-    except Exception as e:
-        logger.warning(f"Error resetting stale workers on startup: {e}")
-        
+    # Database connection initialized
     logger.info("Application startup sequence completed successfully.")
     yield
     # Shutdown tasks
@@ -561,19 +554,16 @@ async def ws_browser(websocket: WebSocket, job_id: int, token: str = None, db: S
     # Retrieve browser WS debug URL
     cdp_url = None
     active_session = None
+    worker = None
+    task_dispatched = False
     
-    for attempt in range(20): # Wait up to 10s for browser to initialize
+    for attempt in range(25): # Wait up to 12.5s for browser to initialize
         db.expire_all()
-        active_session = crud.get_active_session_by_job(db, job_id)
-        if active_session and active_session.cdp_ws_url:
-            cdp_url = active_session.cdp_ws_url
-            break
-            
-        worker = db.query(models.Worker).filter(models.Worker.current_job_id == job_id).first()
-        if worker and worker.browser_ws_url:
-            cdp_url = worker.browser_ws_url
-            break
-        elif worker and worker.port:
+        worker = db.query(models.Worker).filter(models.Worker.current_job_id == job_id, models.Worker.status.in_(["assigned", "monitoring", "reserved"])).first()
+        if not worker:
+            worker = db.query(models.Worker).filter(models.Worker.current_job_id == job_id).first()
+
+        if worker and worker.port:
             try:
                 query_host = worker.host or settings.WORKER_HOST or "worker"
                 url = f"http://{query_host}:{worker.port}/json"
@@ -583,15 +573,24 @@ async def ws_browser(websocket: WebSocket, job_id: int, token: str = None, db: S
                     for t in targets:
                         if t.get("type") == "page" and t.get("webSocketDebuggerUrl"):
                             cdp_url = t.get("webSocketDebuggerUrl")
-                            worker.browser_ws_url = cdp_url
-                            db.commit()
                             break
                         elif t.get("webSocketDebuggerUrl"):
                             cdp_url = t.get("webSocketDebuggerUrl")
                 if cdp_url:
+                    worker.browser_ws_url = cdp_url
+                    db.commit()
                     break
-            except Exception:
-                pass
+            except Exception as e:
+                # If worker port is dead and not already dispatched, clear stale URL and dispatch job
+                logger.debug(f"Worker {worker.id} on port {worker.port} not responding to /json ({e}).")
+                if not task_dispatched:
+                    celery_app.send_task("worker.run_monitoring_job", args=[job_id])
+                    task_dispatched = True
+
+        active_session = crud.get_active_session_by_job(db, job_id)
+        if active_session and active_session.cdp_ws_url:
+            cdp_url = active_session.cdp_ws_url
+            break
                 
         await asyncio.sleep(0.5)
 
@@ -603,14 +602,15 @@ async def ws_browser(websocket: WebSocket, job_id: int, token: str = None, db: S
     
     # Tunnel to Chromium browser CDP
     # Resolve to IP address to satisfy Chromium's DevTools Host header security check
+    target_host = worker.host if worker and worker.host else settings.WORKER_HOST
     try:
-        worker_target = socket.gethostbyname(settings.WORKER_HOST)
+        worker_target = socket.gethostbyname(target_host)
     except Exception:
-        worker_target = settings.WORKER_HOST
+        worker_target = target_host
 
     try:
         parsed = urlparse(cdp_url)
-        port = parsed.port or 9222
+        port = (worker.port if worker and worker.port else None) or parsed.port or 9222
         netloc = f"{worker_target}:{port}"
         cdp_url = urlunparse((parsed.scheme or "ws", netloc, parsed.path, parsed.params, parsed.query, parsed.fragment))
     except Exception as e:
