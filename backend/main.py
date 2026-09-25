@@ -51,7 +51,34 @@ async def lifespan(app: FastAPI):
     os.makedirs(settings.PROFILES_DIR, exist_ok=True)
     init_db_with_retry(max_retries=15, delay=2)
     
-    # Database connection initialized
+    # Auto-seed initial users if table is empty
+    try:
+        db = next(get_db())
+        admin_user = crud.get_user_by_email(db, email="hnabeel3@gmail.com")
+        if not admin_user:
+            admin_user = crud.create_user(db, schemas.UserCreate(email="hnabeel3@gmail.com", password="AdminPassword123!"))
+            logger.info("Seeded admin account: hnabeel3@gmail.com")
+            
+        if not crud.get_user_by_email(db, email="admin@sessionreserve.com"):
+            crud.create_user(db, schemas.UserCreate(email="admin@sessionreserve.com", password="AdminPassword123!"))
+            logger.info("Seeded secondary admin: admin@sessionreserve.com")
+            
+        # Create default job for https://haj.gov.bh/home if none exist
+        if db.query(models.MonitoringJob).filter(models.MonitoringJob.user_id == admin_user.id).count() == 0:
+            default_job = crud.create_monitoring_job(db, admin_user.id, schemas.MonitoringJobCreate(
+                name="Hajj Platform Registration",
+                target_url="https://haj.gov.bh/home",
+                refresh_interval=30,
+                expected_title="منصة الحج",
+                expected_button="تسجيل جديد",
+                max_retries=100,
+                timeout=30
+            ))
+            crud.update_monitoring_job(db, default_job.id, schemas.MonitoringJobUpdate(status="active"))
+            logger.info(f"Seeded default job ID {default_job.id} for {admin_user.email}")
+    except Exception as e:
+        logger.warning(f"Error checking/seeding initial database state: {e}")
+
     logger.info("Application startup sequence completed successfully.")
     yield
     # Shutdown tasks
@@ -84,7 +111,9 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"detail": "An internal server error occurred. Please contact administrator."}
     )
 
-# Serve screenshots static files
+# Ensure directories exist before mounting static files
+os.makedirs(settings.SCREENSHOTS_DIR, exist_ok=True)
+os.makedirs(settings.PROFILES_DIR, exist_ok=True)
 app.mount("/api/screenshots", StaticFiles(directory=settings.SCREENSHOTS_DIR), name="screenshots")
 
 # --- HEALTH CHECK ENDPOINT ---
