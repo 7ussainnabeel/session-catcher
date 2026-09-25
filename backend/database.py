@@ -8,6 +8,8 @@ from sqlalchemy.orm import sessionmaker
 logger = logging.getLogger("session_reserve.database")
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:sessionsecretpassword123@postgres:5432/session_reserve")
+if DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://", 1)
 
 engine = create_engine(
     DATABASE_URL,
