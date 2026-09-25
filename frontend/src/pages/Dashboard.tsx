@@ -14,7 +14,11 @@ import {
   Loader2,
   Terminal,
   Activity,
-  UserCheck
+  UserCheck,
+  Puzzle,
+  Download,
+  ShieldCheck,
+  X
 } from 'lucide-react';
 
 export const Dashboard: React.FC = () => {
@@ -23,6 +27,7 @@ export const Dashboard: React.FC = () => {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showExtensionModal, setShowExtensionModal] = useState(false);
   const [activeJobId, setActiveJobId] = useState<number | null>(null);
   
   // Recommended Default Job Configuration
@@ -83,26 +88,62 @@ export const Dashboard: React.FC = () => {
 
   useEffect(() => {
     fetchDashboardData();
-    // Realtime logs listener via WebSockets
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/api/ws/dashboard?token=${getAccessToken()}`;
-    const ws = new WebSocket(wsUrl);
 
-    ws.onmessage = (event) => {
-      if (event.data === 'pong') return;
-      try {
-        const parsed = JSON.parse(event.data);
-        if (parsed.type === 'log') {
-          setLogs((prev) => [parsed.data, ...prev].slice(0, 100));
+    let ws: WebSocket | null = null;
+    let reconnectTimeout: any = null;
+    let pingInterval: any = null;
+    let isUnmounted = false;
+
+    const connectWebSocket = () => {
+      if (isUnmounted) return;
+      const token = getAccessToken();
+      if (!token) return;
+
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/api/ws/dashboard?token=${token}`;
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        // Send periodic heartbeat ping every 25s
+        pingInterval = setInterval(() => {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send('ping');
+          }
+        }, 25000);
+      };
+
+      ws.onmessage = (event) => {
+        if (event.data === 'pong') return;
+        try {
+          const parsed = JSON.parse(event.data);
+          if (parsed.type === 'log') {
+            setLogs((prev) => [parsed.data, ...prev.filter(l => l.id !== parsed.data.id)].slice(0, 100));
+          }
+          if (parsed.type === 'job_status_change' || parsed.type === 'session_update') {
+            fetchDashboardData();
+          }
+        } catch (err){}
+      };
+
+      ws.onclose = () => {
+        if (pingInterval) clearInterval(pingInterval);
+        if (!isUnmounted) {
+          reconnectTimeout = setTimeout(connectWebSocket, 3000);
         }
-        if (parsed.type === 'job_status_change') {
-          fetchDashboardData();
-        }
-      } catch (err){}
+      };
+
+      ws.onerror = () => {
+        if (ws) ws.close();
+      };
     };
 
+    connectWebSocket();
+
     return () => {
-      ws.close();
+      isUnmounted = true;
+      if (pingInterval) clearInterval(pingInterval);
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (ws) ws.close();
     };
   }, []);
 
@@ -174,19 +215,30 @@ export const Dashboard: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-extrabold tracking-tight">Dashboard</h1>
-          <p className="text-sm text-zinc-400">Manage persistent session checkers and browser reserves.</p>
+          <p className="text-sm text-zinc-400">Manage persistent session checkers, remote browser reserves, and extension telemetry.</p>
         </div>
         
-        <button
-          onClick={() => {
-            resetToRecommendedDefaults();
-            setShowCreateModal(true);
-          }}
-          className="glass-button px-4 py-2.5 flex items-center justify-center gap-2 text-sm"
-        >
-          <Plus size={16} />
-          New Monitoring Job
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowExtensionModal(true)}
+            className="glass-button-secondary px-3.5 py-2.5 flex items-center justify-center gap-2 text-xs font-semibold"
+            title="Download & configure the Chrome/Edge extension"
+          >
+            <Puzzle size={15} className="text-cyan-400" />
+            Browser Extension
+          </button>
+
+          <button
+            onClick={() => {
+              resetToRecommendedDefaults();
+              setShowCreateModal(true);
+            }}
+            className="glass-button px-4 py-2.5 flex items-center justify-center gap-2 text-sm"
+          >
+            <Plus size={16} />
+            New Monitoring Job
+          </button>
+        </div>
       </div>
 
       {/* Analytics/Summary Cards */}
@@ -557,6 +609,70 @@ export const Dashboard: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* EXTENSION COMPANION MODAL */}
+      {showExtensionModal && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 z-40">
+          <div className="glass-panel w-full max-w-xl p-6 bg-zinc-950/95 border border-zinc-800 flex flex-col gap-5 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Puzzle className="text-cyan-400" size={20} />
+                <h3 className="text-lg font-bold text-zinc-100">Hajj Portal Session & Queue Assistant</h3>
+              </div>
+              <button onClick={() => setShowExtensionModal(false)} className="text-zinc-500 hover:text-zinc-300">
+                <X size={18} />
+              </button>
+            </div>
+
+            <p className="text-xs text-zinc-400 leading-relaxed">
+              The official Manifest V3 extension runs natively in your personal browser (Chrome / Edge) to maintain persistent session heartbeats, track real-time queue position, and alert you with audio chimes the instant registration becomes available on <code className="text-cyan-400">https://haj.gov.bh/</code>.
+            </p>
+
+            <div className="bg-zinc-900/60 border border-zinc-800 rounded-lg p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="flex flex-col gap-1">
+                <span className="text-xs font-bold text-zinc-200">Download Extension Package</span>
+                <span className="text-[11px] text-zinc-400">Ready to load in Chrome or Edge (Manifest V3)</span>
+              </div>
+              <a
+                href="/api/extension/download"
+                download="hajj-session-queue-assistant.zip"
+                className="glass-button px-4 py-2 text-xs flex items-center gap-2 whitespace-nowrap"
+              >
+                <Download size={14} />
+                Download ZIP Bundle
+              </a>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-300">Installation Steps (Google Chrome & Microsoft Edge):</h4>
+              <ol className="list-decimal list-inside text-xs text-zinc-400 space-y-1.5 pl-1 leading-relaxed">
+                <li>Download and extract the <code className="text-zinc-300">hajj-session-queue-assistant.zip</code> file.</li>
+                <li>Navigate to <code className="text-cyan-400 font-mono">chrome://extensions/</code> or <code className="text-cyan-400 font-mono">edge://extensions/</code> in your browser.</li>
+                <li>Enable <strong>Developer mode</strong> using the toggle in the top corner.</li>
+                <li>Click <strong>Load unpacked</strong> and select the extracted extension folder.</li>
+                <li>Open <code className="text-cyan-400 font-mono">https://haj.gov.bh/</code>, log in with eKey, and click <strong>[ START ASSISTANT ]</strong> in the extension popup.</li>
+              </ol>
+            </div>
+
+            <div className="bg-emerald-950/20 border border-emerald-900/30 rounded-lg p-3 flex items-start gap-2.5">
+              <ShieldCheck className="text-emerald-400 shrink-0 mt-0.5" size={16} />
+              <p className="text-[11px] text-emerald-300 leading-relaxed">
+                <strong>Privacy Certified:</strong> No passwords, OTPs, CPR numbers, or cookie values are stored or sent externally. All keep-alive pulses use genuine browser sessions.
+              </p>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setShowExtensionModal(false)}
+                className="glass-button-secondary px-5 py-2 text-xs"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

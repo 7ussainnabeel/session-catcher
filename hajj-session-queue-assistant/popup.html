@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hajj Portal Session & Queue Assistant</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body class="cyber-theme">
+  
+  <!-- Header Bar -->
+  <header class="app-header">
+    <div class="brand">
+      <div class="status-pulse-dot" id="globalStatusDot"></div>
+      <div class="brand-text">
+        <h1 class="title">HAJJ PORTAL</h1>
+        <span class="subtitle">SESSION & QUEUE ASSISTANT</span>
+      </div>
+    </div>
+    <div class="target-badge">
+      <span class="target-label">TARGET:</span>
+      <span class="target-domain">haj.gov.bh</span>
+    </div>
+  </header>
+
+  <!-- Navigation Tabs -->
+  <nav class="nav-tabs">
+    <button class="tab-btn active" data-tab="tab-overview">Overview</button>
+    <button class="tab-btn" data-tab="tab-queue">Queue & Integrity</button>
+    <button class="tab-btn" data-tab="tab-inspector">Inspector</button>
+    <button class="tab-btn" data-tab="tab-history">History</button>
+    <button class="tab-btn" data-tab="tab-settings">Settings</button>
+  </nav>
+
+  <!-- Main Content Container -->
+  <main class="tab-content-container">
+
+    <!-- 1. OVERVIEW TAB -->
+    <section id="tab-overview" class="tab-pane active">
+      
+      <!-- Critical Availability Alert Banner -->
+      <div id="availabilityBanner" class="alert-banner hidden">
+        <div class="alert-icon">⚡</div>
+        <div class="alert-info">
+          <div class="alert-title">SERVICE AVAILABLE</div>
+          <div class="alert-desc" id="availabilityDesc">Portal service is open for booking!</div>
+        </div>
+        <button id="btnFocusTab" class="btn-alert-action">FOCUS TAB</button>
+      </div>
+
+      <!-- Telemetry Cards Grid -->
+      <div class="telemetry-grid">
+        <div class="telemetry-card">
+          <span class="card-label">SESSION</span>
+          <div class="card-val-row">
+            <span id="metricSessionStatus" class="card-value status-badge badge-inactive">DISCONNECTED</span>
+          </div>
+          <span class="card-sub" id="metricHttpStatus">HTTP: --</span>
+        </div>
+
+        <div class="telemetry-card">
+          <span class="card-label">SESSION AGE</span>
+          <div class="card-val-row">
+            <span id="metricSessionAge" class="card-value mono-val">00:00:00</span>
+          </div>
+          <span class="card-sub" id="metricLastActivity">Last: --</span>
+        </div>
+
+        <div class="telemetry-card">
+          <span class="card-label">KEEP ALIVE</span>
+          <div class="card-val-row">
+            <span id="metricKeepAliveStatus" class="card-value status-badge badge-neutral">DISABLED</span>
+          </div>
+          <span class="card-sub" id="metricNextRefresh">Next: --</span>
+        </div>
+
+        <div class="telemetry-card">
+          <span class="card-label">QUEUE</span>
+          <div class="card-val-row">
+            <span id="metricQueueActive" class="card-value status-badge badge-neutral">IDLE</span>
+          </div>
+          <span class="card-sub" id="metricQueueId">ID: None</span>
+        </div>
+
+        <div class="telemetry-card">
+          <span class="card-label">POSITION</span>
+          <div class="card-val-row">
+            <span id="metricQueuePos" class="card-value mono-val accent-pos">--</span>
+          </div>
+          <span class="card-sub" id="metricWaitTime">ETA: --</span>
+        </div>
+
+        <div class="telemetry-card">
+          <span class="card-label">SERVICE STATUS</span>
+          <div class="card-val-row">
+            <span id="metricServiceStatus" class="card-value status-badge badge-waiting">WAITING</span>
+          </div>
+          <span class="card-sub" id="metricLastUpdate">Updated: --</span>
+        </div>
+      </div>
+
+      <!-- Observed Endpoint Selection -->
+      <div class="control-box">
+        <label class="control-label" for="selectSessionEndpoint">OBSERVED SESSION ENDPOINT:</label>
+        <select id="selectSessionEndpoint" class="cyber-select">
+          <option value="/home">Default (/home)</option>
+        </select>
+        <p class="control-hint">Heartbeats are only dispatched to genuine observed application endpoints.</p>
+      </div>
+
+      <!-- Action Buttons Panel -->
+      <div class="action-grid">
+        <button id="btnStartAssistant" class="btn-primary">
+          <span class="btn-icon">▶</span> START ASSISTANT
+        </button>
+
+        <button id="btnToggleKeepAlive" class="btn-secondary">
+          <span class="btn-icon">🔄</span> KEEP SESSION ACTIVE
+        </button>
+
+        <button id="btnToggleQueue" class="btn-secondary">
+          <span class="btn-icon">📊</span> MONITOR QUEUE
+        </button>
+
+        <button id="btnTriggerNotification" class="btn-secondary">
+          <span class="btn-icon">🔔</span> NOTIFICATIONS
+        </button>
+
+        <button id="btnStopAll" class="btn-danger full-width">
+          <span class="btn-icon">⏹</span> STOP ALL
+        </button>
+      </div>
+
+    </section>
+
+    <!-- 2. QUEUE & INTEGRITY TAB -->
+    <section id="tab-queue" class="tab-pane">
+      <div class="section-title-row">
+        <h2>QUEUE TELEMETRY & INTEGRITY ANALYSIS</h2>
+      </div>
+
+      <div class="queue-details-box">
+        <div class="detail-row">
+          <span class="detail-name">Queue Status:</span>
+          <span id="qDetailStatus" class="detail-val">IDLE</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-name">Current Position:</span>
+          <span id="qDetailPos" class="detail-val mono-val">--</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-name">Estimated Wait Time:</span>
+          <span id="qDetailEta" class="detail-val">--</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-name">Last Queue Update:</span>
+          <span id="qDetailLastUpdate" class="detail-val">--</span>
+        </div>
+      </div>
+
+      <div class="table-container">
+        <div class="table-header-title">PASSIVE PARAMETER INTEGRITY (ORIGIN ANALYSIS)</div>
+        <table class="cyber-table">
+          <thead>
+            <tr>
+              <th>Parameter</th>
+              <th>Source</th>
+              <th>Validation</th>
+              <th>Observed</th>
+            </tr>
+          </thead>
+          <tbody id="queueIntegrityTableBody">
+            <tr>
+              <td colspan="4" class="empty-cell">No queue parameters observed yet.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 3. REQUEST INSPECTOR TAB -->
+    <section id="tab-inspector" class="tab-pane">
+      <div class="section-title-row">
+        <h2>LIVE REQUEST INSPECTOR</h2>
+        <span class="sanitized-tag">AUTO-SANITIZED</span>
+      </div>
+      <p class="section-desc">Passively observed network traffic on haj.gov.bh. Sensitive tokens and credentials redacted.</p>
+
+      <div class="table-container inspector-container">
+        <table class="cyber-table">
+          <thead>
+            <tr>
+              <th>Method</th>
+              <th>Path</th>
+              <th>Status</th>
+              <th>Latency</th>
+              <th>Type</th>
+            </tr>
+          </thead>
+          <tbody id="requestInspectorTableBody">
+            <tr>
+              <td colspan="5" class="empty-cell">Waiting for application network requests...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 4. HISTORY & EXPORT TAB -->
+    <section id="tab-history" class="tab-pane">
+      <div class="section-title-row">
+        <h2>SESSION & QUEUE HISTORY</h2>
+      </div>
+
+      <div class="export-actions">
+        <span class="export-label">Export Audit Log:</span>
+        <button id="btnExportJSON" class="btn-export">JSON</button>
+        <button id="btnExportCSV" class="btn-export">CSV</button>
+        <button id="btnExportMD" class="btn-export">Markdown</button>
+        <button id="btnExportHTML" class="btn-export">HTML</button>
+        <button id="btnClearLogs" class="btn-export danger">Clear</button>
+      </div>
+
+      <div class="table-container history-container">
+        <table class="cyber-table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Session</th>
+              <th>HTTP</th>
+              <th>Latency</th>
+              <th>Queue</th>
+              <th>Pos</th>
+            </tr>
+          </thead>
+          <tbody id="sessionHistoryTableBody">
+            <tr>
+              <td colspan="6" class="empty-cell">No session history records yet.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 5. SETTINGS TAB -->
+    <section id="tab-settings" class="tab-pane">
+      <div class="section-title-row">
+        <h2>ASSISTANT CONFIGURATION</h2>
+      </div>
+
+      <div class="settings-form">
+        <div class="setting-item">
+          <label for="selectKeepAliveInterval">Session Keep-Alive Interval:</label>
+          <select id="selectKeepAliveInterval" class="cyber-select">
+            <option value="1">1 minute</option>
+            <option value="5" selected>5 minutes (Default)</option>
+            <option value="10">10 minutes</option>
+            <option value="15">15 minutes</option>
+            <option value="30">30 minutes</option>
+          </select>
+        </div>
+
+        <div class="setting-item toggle-row">
+          <label for="chkSound">Play Audio Chime on Availability:</label>
+          <input type="checkbox" id="chkSound" checked class="cyber-checkbox">
+        </div>
+
+        <div class="setting-item toggle-row">
+          <label for="chkDesktopNotif">Desktop Browser Notifications:</label>
+          <input type="checkbox" id="chkDesktopNotif" checked class="cyber-checkbox">
+        </div>
+
+        <div class="setting-item toggle-row">
+          <label for="chkAutoFocus">Auto-Focus Portal Tab on Opening:</label>
+          <input type="checkbox" id="chkAutoFocus" checked class="cyber-checkbox">
+        </div>
+
+        <div class="setting-info-box">
+          <p><strong>Security Standard:</strong> This assistant operates strictly using legitimate browser credentials. No external telemetry, no remote scripts, no credentials stored.</p>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Footer Status Bar -->
+  <footer class="app-footer">
+    <div class="footer-status">
+      <span class="engine-badge">ENGINE: PLAYWRIGHT/MV3</span>
+    </div>
+    <div class="footer-time" id="footerClock">--:--:--</div>
+  </footer>
+
+  <!-- Scripts -->
+  <script src="sanitizer.js"></script>
+  <script src="storage.js"></script>
+  <script src="notifications.js"></script>
+  <script src="request-monitor.js"></script>
+  <script src="session-monitor.js"></script>
+  <script src="queue-monitor.js"></script>
+  <script src="report.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

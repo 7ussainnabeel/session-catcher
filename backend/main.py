@@ -16,6 +16,8 @@ import psutil
 import json
 import logging
 import redis
+import io
+import zipfile
 
 import models
 import schemas
@@ -363,6 +365,62 @@ def test_telegram_notification(current_user: models.User = Depends(get_current_u
     except Exception as e:
         logger.error(f"Telegram test error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to connect to Telegram: {str(e)}")
+
+
+# --- EXTENSION COMPANION ENDPOINTS ---
+
+@app.get("/api/extension/download")
+def download_extension_bundle():
+    """Package the Chrome/Edge extension into a downloadable ZIP archive."""
+    ext_dir = os.getenv("EXTENSION_DIR", "/app/hajj-session-queue-assistant")
+    if not os.path.isdir(ext_dir):
+        ext_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "hajj-session-queue-assistant"))
+    
+    if not os.path.isdir(ext_dir):
+        raise HTTPException(status_code=404, detail="Extension directory not found")
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        for root, dirs, files in os.walk(ext_dir):
+            for file in files:
+                file_path = os.path.join(root, file)
+                rel_path = os.path.relpath(file_path, ext_dir)
+                zip_file.write(file_path, rel_path)
+
+    buffer.seek(0)
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": 'attachment; filename="hajj-session-queue-assistant.zip"'
+        }
+    )
+
+@app.post("/api/extension/sync")
+async def sync_extension_telemetry(payload: dict, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Receives telemetry sync from the browser extension and broadcasts to real-time dashboard."""
+    session_status = payload.get("session_status", "UNKNOWN")
+    queue_status = payload.get("queue_status", "UNKNOWN")
+    queue_pos = payload.get("queue_position")
+    
+    msg = f"Browser Extension Synced: Session={session_status}, Queue={queue_status}"
+    if queue_pos is not None:
+        msg += f" (Position #{queue_pos})"
+        
+    db_log = crud.log_activity(db, msg, "info", user_id=current_user.id)
+    
+    await dashboard_ws_manager.broadcast({
+        "type": "log",
+        "data": {
+            "id": db_log.id,
+            "user_id": db_log.user_id,
+            "message": db_log.message,
+            "level": db_log.level,
+            "created_at": db_log.created_at.isoformat()
+        }
+    })
+    
+    return {"status": "synced"}
 
 
 # --- AUDIT LOGS ENDPOINTS ---

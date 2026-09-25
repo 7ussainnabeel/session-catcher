@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Options — Hajj Portal Session & Queue Assistant</title>
+  <link rel="stylesheet" href="popup.css">
+  <style>
+    body.options-page {
+      width: 100%;
+      max-width: 720px;
+      height: auto;
+      min-height: 100vh;
+      margin: 0 auto;
+      padding: 30px 20px;
+      overflow-y: auto;
+    }
+    .options-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .options-title {
+      font-size: 16px;
+      font-weight: 800;
+      color: var(--accent-cyan);
+      margin-bottom: 15px;
+      border-bottom: 1px solid var(--border-color);
+      padding-bottom: 8px;
+    }
+    .form-group {
+      margin-bottom: 15px;
+    }
+    .form-group label {
+      display: block;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-secondary);
+      margin-bottom: 6px;
+    }
+    .form-hint {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+    .save-status {
+      display: inline-block;
+      margin-left: 10px;
+      font-size: 12px;
+      color: var(--accent-emerald);
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body class="cyber-theme options-page">
+
+  <header class="app-header" style="border-radius: 8px; margin-bottom: 25px;">
+    <div class="brand">
+      <div class="status-pulse-dot online"></div>
+      <div class="brand-text">
+        <h1 class="title">HAJJ PORTAL SESSION & QUEUE ASSISTANT</h1>
+        <span class="subtitle">ADVANCED CONFIGURATION & COMPLIANCE</span>
+      </div>
+    </div>
+    <div class="target-badge">
+      <span class="target-label">PRODUCTION:</span>
+      <span class="target-domain">haj.gov.bh</span>
+    </div>
+  </header>
+
+  <div class="options-card">
+    <div class="options-title">Session Heartbeat Settings</div>
+    
+    <div class="form-group">
+      <label for="optKeepAliveInterval">Session Keep-Alive Interval:</label>
+      <select id="optKeepAliveInterval" class="cyber-select" style="width: 100%; max-width: 300px;">
+        <option value="1">1 minute</option>
+        <option value="5">5 minutes (Recommended Default)</option>
+        <option value="10">10 minutes</option>
+        <option value="15">15 minutes</option>
+        <option value="30">30 minutes</option>
+      </select>
+      <p class="form-hint">Conservative intervals avoid unnecessary server strain while keeping authentication active.</p>
+    </div>
+
+    <div class="form-group">
+      <label for="optSessionEndpoint">Observed Session Endpoint:</label>
+      <select id="optSessionEndpoint" class="cyber-select" style="width: 100%;">
+        <option value="/home">Default (/home)</option>
+      </select>
+      <p class="form-hint">Discovered automatically from legitimate browser network activity.</p>
+    </div>
+  </div>
+
+  <div class="options-card">
+    <div class="options-title">Queue & Availability Monitoring</div>
+    
+    <div class="form-group">
+      <label for="optQueueEndpoint">Observed Queue Endpoint:</label>
+      <select id="optQueueEndpoint" class="cyber-select" style="width: 100%;">
+        <option value="">Passive Observation Mode (Learned from page)</option>
+      </select>
+      <p class="form-hint">Auto-detected when the portal presents a queue/waitroom state.</p>
+    </div>
+
+    <div class="setting-item toggle-row" style="margin-bottom: 10px;">
+      <label for="optSound">Play Audio Chime on Availability:</label>
+      <input type="checkbox" id="optSound" class="cyber-checkbox">
+    </div>
+
+    <div class="setting-item toggle-row" style="margin-bottom: 10px;">
+      <label for="optDesktopNotif">Browser Desktop Notifications:</label>
+      <input type="checkbox" id="optDesktopNotif" class="cyber-checkbox">
+    </div>
+
+    <div class="setting-item toggle-row">
+      <label for="optAutoFocus">Auto-Focus Portal Tab on Service Opening:</label>
+      <input type="checkbox" id="optAutoFocus" class="cyber-checkbox">
+    </div>
+  </div>
+
+  <div class="options-card">
+    <div class="options-title">Privacy & Security Standard</div>
+    <div class="setting-info-box">
+      <p>✔ <strong>Automatic Redaction:</strong> Passwords, OTPs, CPR identification numbers, Cookies, and Authorization tokens are sanitized locally prior to any telemetry storage or export.</p>
+      <p style="margin-top: 6px;">✔ <strong>Zero Third-Party Telemetry:</strong> All storage is retained solely inside <code>chrome.storage.local</code> on your device.</p>
+    </div>
+  </div>
+
+  <div style="display: flex; align-items: center; margin-top: 20px;">
+    <button id="btnSaveOptions" class="btn-primary" style="max-width: 200px;">SAVE SETTINGS</button>
+    <span id="saveStatus" class="save-status"></span>
+  </div>
+
+  <script src="sanitizer.js"></script>
+  <script src="storage.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

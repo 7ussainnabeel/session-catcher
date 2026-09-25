@@ -63,6 +63,7 @@ services:
       - "8000:8000"
     volumes:
       - shared_data:/app/shared
+      - ./hajj-session-queue-assistant:/app/hajj-session-queue-assistant:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -97,6 +98,7 @@ services:
       - PROFILES_DIR=/app/shared/browser-profiles
     volumes:
       - shared_data:/app/shared
+      - ./hajj-session-queue-assistant:/app/hajj-session-queue-assistant:ro
     depends_on:
       postgres:
         condition: service_healthy

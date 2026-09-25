@@ -335,24 +335,36 @@ async def async_run_monitoring_job(job_id: int):
     logger.info(f"Starting browser instance on port {cdp_port} for user {user_id}")
     
     async with async_playwright() as p:
-        # Launch Chromium with persistent user profile and remote debug port
-        # Note: --headless=new runs headless but rendering frames and screencasting is fully active.
+        browser_args = [
+            f"--remote-debugging-port={cdp_port}",
+            "--remote-debugging-address=0.0.0.0",
+            "--remote-allow-origins=*",
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+            "--disable-breakpad",
+            "--no-first-run",
+            "--mute-audio",
+            "--disable-background-networking"
+        ]
+
+        ext_path = os.getenv("EXTENSION_DIR", "/app/hajj-session-queue-assistant")
+        if os.path.isdir(ext_path) and os.path.isfile(os.path.join(ext_path, "manifest.json")):
+            browser_args.extend([
+                f"--disable-extensions-except={ext_path}",
+                f"--load-extension={ext_path}"
+            ])
+            logger.info(f"Loaded Hajj Portal Assistant extension from {ext_path}")
+
         browser_context = await p.chromium.launch_persistent_context(
             user_data_dir=profile_dir,
             headless=True,
-            args=[
-                f"--remote-debugging-port={cdp_port}",
-                "--remote-debugging-address=0.0.0.0",
-                "--remote-allow-origins=*",
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-                "--disable-breakpad",
-                "--no-first-run",
-                "--mute-audio",
-                "--disable-background-networking"
-            ]
+            viewport={"width": 1280, "height": 720},
+            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+            locale="ar-BH",
+            timezone_id="Asia/Bahrain",
+            args=browser_args
         )
         
         try:

@@ -1,0 +1,61 @@
+{
+  "manifest_version": 3,
+  "name": "Hajj Portal Session & Queue Assistant",
+  "version": "1.0.0",
+  "description": "Maintains authenticated session integrity and monitors real-time queue states on the official Hajj portal.",
+  "permissions": [
+    "storage",
+    "alarms",
+    "notifications",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://haj.gov.bh/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    },
+    "default_title": "Hajj Portal Session & Queue Assistant"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://haj.gov.bh/*"
+      ],
+      "js": [
+        "sanitizer.js",
+        "content.js"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "injected-interceptor.js",
+        "icons/*"
+      ],
+      "matches": [
+        "https://haj.gov.bh/*"
+      ]
+    }
+  ],
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  }
+}
