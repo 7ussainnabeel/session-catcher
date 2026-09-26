@@ -20,9 +20,10 @@ ENV PYTHONUNBUFFERED=1 \
 # Expose port range 9000-9999 for CDP proxies
 EXPOSE 9000-9999
 
-# Celery Worker Healthcheck
-HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-    CMD celery -A worker.celery_app inspect ping || exit 1
+# Celery Worker Healthcheck: Fast and reliable Redis ping and process check
+HEALTHCHECK --interval=20s --timeout=5s --retries=5 --start-period=15s \
+    CMD python3 -c "import os, redis; r=redis.from_url(os.getenv('REDIS_URL', 'redis://redis:6379/0')); r.ping()" && pgrep -f 'celery -A worker.celery_app worker' || exit 1
 
-# Run celery worker daemon with configurable concurrency
-CMD ["sh", "-c", "celery -A worker.celery_app worker --loglevel=info -c ${CELERY_CONCURRENCY}"]
+# Run celery worker daemon with configurable concurrency and task recycling
+CMD ["sh", "-c", "celery -A worker.celery_app worker --loglevel=info -c ${CELERY_CONCURRENCY:-40} --max-tasks-per-child=50"]
+

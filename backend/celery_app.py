@@ -15,5 +15,22 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
-    broker_connection_retry_on_startup=True
+    broker_connection_retry_on_startup=True,
+    broker_connection_max_retries=10,
+    broker_transport_options={
+        'visibility_timeout': 43200,
+        'socket_timeout': 30,
+        'socket_connect_timeout': 30,
+        'socket_keepalive': True,
+        'retry_on_timeout': True,
+    },
+    result_backend_transport_options={
+        'socket_timeout': 30,
+        'socket_connect_timeout': 30,
+        'socket_keepalive': True,
+        'retry_on_timeout': True,
+    },
+    redis_retry_on_timeout=True,
+    redis_socket_keepalive=True,
 )
+

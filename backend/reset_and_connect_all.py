@@ -20,11 +20,12 @@ def reset_and_connect_all():
     except Exception as e:
         print(f"[-] Redis purge warning: {e}")
 
-    # 2. Reset workers table
+    # 2. Reset workers and stale active sessions table
     try:
         db.query(models.Worker).delete()
+        db.query(models.Session).filter(models.Session.status == "active").update({"status": "expired"})
         db.commit()
-        print("[+] Stale worker records cleared from DB.")
+        print("[+] Stale worker records and expired sessions cleared from DB.")
     except Exception as e:
         db.rollback()
         print(f"[-] Worker cleanup warning: {e}")
@@ -44,7 +45,7 @@ def reset_and_connect_all():
             expected_text="بدء التسجيل or تقديم طلب التسجيل",
             expected_element='a[href*="/register"]',
             expected_title="نظام تسجيل الحج",
-            expected_url="/booking-confirmed",
+            expected_url="",
             expected_http_response=200,
             max_retries=100,
             timeout=30,
@@ -63,7 +64,7 @@ def reset_and_connect_all():
         j.expected_text = "بدء التسجيل or تقديم طلب التسجيل"
         j.expected_element = 'a[href*="/register"]'
         j.expected_title = "نظام تسجيل الحج"
-        j.expected_url = "/booking-confirmed"
+        j.expected_url = ""
         j.expected_http_response = 200
         j.max_retries = 100
         j.timeout = 30

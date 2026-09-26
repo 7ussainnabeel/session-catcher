@@ -12,7 +12,7 @@ class Settings:
     REFRESH_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_MINUTES", str(60 * 24 * 7)))  # 7 days
     PROFILES_DIR: str = os.getenv("PROFILES_DIR", "/app/shared/browser-profiles")
     SCREENSHOTS_DIR: str = os.getenv("SCREENSHOTS_DIR", "/app/shared/screenshots")
-    MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", "5"))
+    MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", "40"))
     WORKER_HOST: str = os.getenv("WORKER_HOST", "worker")
     CORS_ORIGINS_RAW: str = os.getenv("CORS_ORIGINS", "*")
 

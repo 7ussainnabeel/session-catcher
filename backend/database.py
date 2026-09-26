@@ -16,7 +16,7 @@ def get_engine(url: str):
         return create_engine(url, connect_args={"check_same_thread": False})
     return create_engine(
         url,
-        pool_size=20,
+        pool_size=40,
         max_overflow=40,
         pool_pre_ping=True,
         pool_recycle=300

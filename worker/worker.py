@@ -9,6 +9,8 @@ import re
 from urllib.parse import urlparse, parse_qs
 from email.mime.text import MIMEText
 from datetime import datetime
+import time
+import random
 from celery import Celery
 from playwright.async_api import async_playwright
 import urllib.request
@@ -30,6 +32,33 @@ PROFILES_DIR = os.getenv("PROFILES_DIR", "/app/shared/browser-profiles")
 # Celery app
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 celery_app = Celery("session_reserve", broker=REDIS_URL, backend=REDIS_URL)
+
+celery_app.conf.update(
+    task_serializer="json",
+    accept_content=["json"],
+    result_serializer="json",
+    timezone="UTC",
+    enable_utc=True,
+    broker_connection_retry_on_startup=True,
+    broker_connection_max_retries=10,
+    broker_transport_options={
+        'visibility_timeout': 43200,
+        'socket_timeout': 30,
+        'socket_connect_timeout': 30,
+        'socket_keepalive': True,
+        'retry_on_timeout': True,
+    },
+    result_backend_transport_options={
+        'socket_timeout': 30,
+        'socket_connect_timeout': 30,
+        'socket_keepalive': True,
+        'retry_on_timeout': True,
+    },
+    redis_retry_on_timeout=True,
+    redis_socket_keepalive=True,
+    worker_prefetch_multiplier=1,
+    worker_max_tasks_per_child=50,
+)
 
 def find_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -332,7 +361,19 @@ async def async_run_monitoring_job(job_id: int):
     # Strict isolation: Each checker has a dedicated browser profile so sessions and cookies never overlap
     profile_dir = os.path.join(PROFILES_DIR, f"job_{job_id}_user_{user_id}")
     os.makedirs(profile_dir, exist_ok=True)
-    
+
+    # Clean up stale Chromium singleton locks if any previous process died abruptly
+    for lock_name in ["SingletonLock", "SingletonSocket", "SingletonCookie"]:
+        lock_file = os.path.join(profile_dir, lock_name)
+        if os.path.exists(lock_file) or os.path.islink(lock_file):
+            try:
+                os.unlink(lock_file)
+            except Exception:
+                pass
+
+    # Stagger launches slightly to avoid CPU and disk I/O stampede across parallel workers
+    await asyncio.sleep(random.uniform(0.1, 1.2))
+
     logger.info(f"Starting isolated browser checker on port {cdp_port} for job {job_id} (profile: {profile_dir})")
     
     async with async_playwright() as p:
@@ -344,10 +385,16 @@ async def async_run_monitoring_job(job_id: int):
             "--disable-setuid-sandbox",
             "--disable-dev-shm-usage",
             "--disable-gpu",
+            "--disable-software-rasterizer",
             "--disable-breakpad",
             "--no-first-run",
             "--mute-audio",
-            "--disable-background-networking"
+            "--disable-background-networking",
+            "--disable-default-apps",
+            "--disable-sync",
+            "--disable-translate",
+            "--disable-renderer-backgrounding",
+            "--js-flags=--max-old-space-size=128",
         ]
 
         ext_path = os.getenv("EXTENSION_DIR", "/app/hajj-session-queue-assistant")
@@ -361,6 +408,7 @@ async def async_run_monitoring_job(job_id: int):
         browser_context = await p.chromium.launch_persistent_context(
             user_data_dir=profile_dir,
             headless=True,
+            timeout=60000,
             viewport={"width": 1280, "height": 720},
             user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
             locale="ar-BH",
@@ -436,6 +484,17 @@ async def async_run_monitoring_job(job_id: int):
                                 break
                             if "waiting" not in chk_url and "wait" not in chk_url:
                                 logger.info(f"Redirected out of queue to: {chk_url}")
+                                # Try to click Bahraini registration link if on home portal page
+                                try:
+                                    bahraini_link = page.locator('a[href*="/register/bahraini"]').first
+                                    if await bahraini_link.is_visible(timeout=3000):
+                                        await bahraini_link.click()
+                                        await page.wait_for_timeout(2000)
+                                except Exception:
+                                    pass
+                                if "/register" in page.url:
+                                    success = True
+                                    status_msg = f"Registration page active: {page.url}"
                                 break
                         if success:
                             break
@@ -460,7 +519,13 @@ async def async_run_monitoring_job(job_id: int):
                         logger.info(f"URL check: '{page.url}' containing '{job.expected_url}' (Match: {url_match})")
                         
                     if job.expected_text:
-                        body_text = await page.inner_text("body")
+                        try:
+                            body_text = await page.inner_text("body", timeout=5000)
+                        except Exception:
+                            try:
+                                body_text = await page.content()
+                            except Exception:
+                                body_text = ""
                         if " or " in job.expected_text:
                             options = [t.strip() for t in job.expected_text.split(" or ") if t.strip()]
                             text_match = any(opt in body_text for opt in options)
@@ -473,12 +538,23 @@ async def async_run_monitoring_job(job_id: int):
                         logger.info(f"Text check: body containing '{job.expected_text}' (Match: {text_match})")
                         
                     if job.expected_element:
-                        el_visible = await page.locator(job.expected_element).is_visible()
+                        try:
+                            # Use .first to avoid strict mode violations when selector matches multiple items
+                            loc = page.locator(job.expected_element).first
+                            el_visible = await loc.is_visible(timeout=3000)
+                        except Exception as elem_err:
+                            logger.debug(f"Element check evaluation error: {elem_err}")
+                            el_visible = False
                         conditions_met.append(el_visible)
                         logger.info(f"Element check: locator '{job.expected_element}' visible (Match: {el_visible})")
                         
                     if job.expected_button:
-                        btn_enabled = await page.locator(job.expected_button).is_enabled()
+                        try:
+                            btn_loc = page.locator(job.expected_button).first
+                            btn_enabled = await btn_loc.is_enabled(timeout=3000)
+                        except Exception as btn_err:
+                            logger.debug(f"Button check evaluation error: {btn_err}")
+                            btn_enabled = False
                         conditions_met.append(btn_enabled)
                         logger.info(f"Button check: locator '{job.expected_button}' enabled (Match: {btn_enabled})")
 
