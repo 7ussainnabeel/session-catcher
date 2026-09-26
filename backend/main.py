@@ -223,7 +223,14 @@ def list_jobs(current_user: models.User = Depends(get_current_user), db: Session
 
 @app.post("/api/jobs", response_model=schemas.MonitoringJobOut)
 def create_job(job: schemas.MonitoringJobCreate, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return crud.create_monitoring_job(db=db, user_id=current_user.id, job=job)
+    db_job = crud.create_monitoring_job(db=db, user_id=current_user.id, job=job)
+    # Directly activate and dispatch dedicated checker worker to begin monitoring immediately
+    db_job.status = "active"
+    db.commit()
+    db.refresh(db_job)
+    celery_app.send_task("worker.run_monitoring_job", args=[db_job.id])
+    crud.log_activity(db, f"Checker spawned automatically for new monitoring job: {db_job.name} (ID {db_job.id})", "info", user_id=current_user.id, job_id=db_job.id)
+    return db_job
 
 @app.get("/api/jobs/{job_id}", response_model=schemas.MonitoringJobOut)
 def get_job(job_id: int, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):

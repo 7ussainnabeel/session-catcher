@@ -329,10 +329,11 @@ async def async_run_monitoring_job(job_id: int):
     db_worker.current_job_id = job_id
     db.commit()
     
-    profile_dir = os.path.join(PROFILES_DIR, f"user_{user_id}")
+    # Strict isolation: Each checker has a dedicated browser profile so sessions and cookies never overlap
+    profile_dir = os.path.join(PROFILES_DIR, f"job_{job_id}_user_{user_id}")
     os.makedirs(profile_dir, exist_ok=True)
     
-    logger.info(f"Starting browser instance on port {cdp_port} for user {user_id}")
+    logger.info(f"Starting isolated browser checker on port {cdp_port} for job {job_id} (profile: {profile_dir})")
     
     async with async_playwright() as p:
         browser_args = [
@@ -398,9 +399,24 @@ async def async_run_monitoring_job(job_id: int):
                     break
                     
                 try:
+                    # If page is already on registration flow (e.g. user entered or queue passed), freeze navigation immediately
+                    current_url = page.url
+                    if "/register" in current_url:
+                        logger.info(f"Active registration page detected at {current_url}. Freezing navigation to preserve form/session.")
+                        success = True
+                        status_msg = f"Registration page active: {current_url}"
+                        break
+
                     logger.info(f"Navigating to {job.target_url} (Attempt {retries+1}/{job.max_retries})")
                     response = await page.goto(job.target_url, timeout=job.timeout * 1000)
                     
+                    # Check if navigation redirected to registration page
+                    if "/register" in page.url:
+                        logger.info(f"Redirected to registration page: {page.url}. Freezing navigation.")
+                        success = True
+                        status_msg = f"Reached registration page: {page.url}"
+                        break
+
                     # Evaluate conditions
                     conditions_met = []
                     
@@ -513,14 +529,31 @@ async def async_run_monitoring_job(job_id: int):
                     photo_path=screenshot_path
                 )
                 
-                # Enter wait/hold loop - keep browser active and alive for user to connect
-                logger.info("Entering hold loop. Browser is kept open...")
+                # Enter wait/hold loop - keep browser active and alive without reloading the page
+                logger.info("Entering session hold loop. Page is kept open and form inputs preserved...")
+                last_keepalive_time = time.time()
                 while True:
                     db.refresh(db_session)
                     db.refresh(job)
                     if db_session.status != "active" or job.status != "success":
                         logger.info("Session closed by server/user. Tearing down browser...")
                         break
+                    
+                    # Background keep-alive heartbeat every 2 minutes without full page reload
+                    now = time.time()
+                    if now - last_keepalive_time > 120:
+                        last_keepalive_time = now
+                        try:
+                            await page.evaluate("""
+                                () => {
+                                    fetch('/home', { method: 'GET', credentials: 'include', cache: 'no-cache' })
+                                        .catch(() => {});
+                                }
+                            """)
+                            logger.info("Dispatched background session keep-alive heartbeat (no page reload).")
+                        except Exception as e:
+                            logger.debug(f"Keep-alive heartbeat notice: {e}")
+
                     await asyncio.sleep(5)
                     
             else:
