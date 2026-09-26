@@ -1,5 +1,6 @@
 import asyncio
 import os
+import time
 import socket
 import logging
 import requests
@@ -471,7 +472,25 @@ async def async_run_monitoring_job(job_id: int):
                         status_msg = f"Failed after maximum retries: {str(e)}"
                         break
                         
-                await asyncio.sleep(job.refresh_interval)
+                # Wait for next check interval, polling frequently in 3s slices to detect when queue passes
+                sleep_remaining = job.refresh_interval
+                while sleep_remaining > 0:
+                    step = min(sleep_remaining, 3)
+                    await asyncio.sleep(step)
+                    sleep_remaining -= step
+                    
+                    db.refresh(job)
+                    if job.status != "active":
+                        break
+                        
+                    current_url = page.url
+                    if "/register" in current_url:
+                        logger.info(f"Detected auto-redirect to registration page: {current_url}. Freezing session.")
+                        success = True
+                        status_msg = f"Reached registration page: {current_url}"
+                        break
+                if success or job.status != "active":
+                    break
                 
             # Post-loop checks
             if success:

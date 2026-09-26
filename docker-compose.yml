@@ -99,6 +99,11 @@ services:
       - PROFILES_DIR=/app/shared/browser-profiles
     volumes:
       - shared_data:/app/shared
+      - ./worker/worker.py:/app/worker.py
+      - ./backend/database.py:/app/database.py
+      - ./backend/models.py:/app/models.py
+      - ./backend/crud.py:/app/crud.py
+      - ./backend/schemas.py:/app/schemas.py
       - ./hajj-session-queue-assistant:/app/hajj-session-queue-assistant:ro
     depends_on:
       postgres:

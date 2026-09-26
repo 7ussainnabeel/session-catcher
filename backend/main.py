@@ -583,7 +583,7 @@ async def ws_browser(websocket: WebSocket, job_id: int, token: Optional[str] = N
     worker = None
     task_dispatched = False
     
-    for attempt in range(25): # Wait up to 12.5s for browser to initialize
+    for attempt in range(60): # Wait up to 30s for browser to initialize
         db.expire_all()
         worker = db.query(models.Worker).filter(models.Worker.current_job_id == job_id, models.Worker.status.in_(["assigned", "monitoring", "reserved"])).first()
         if not worker:
@@ -607,11 +607,8 @@ async def ws_browser(websocket: WebSocket, job_id: int, token: Optional[str] = N
                     db.commit()
                     break
             except Exception as e:
-                # If worker port is dead and not already dispatched, clear stale URL and dispatch job
-                logger.debug(f"Worker {worker.id} on port {worker.port} not responding to /json ({e}).")
-                if not task_dispatched:
-                    celery_app.send_task("worker.run_monitoring_job", args=[job_id])
-                    task_dispatched = True
+                # Browser port is still starting up, wait for next attempt
+                logger.debug(f"Worker {worker.id} on port {worker.port} not ready yet: {e}")
 
         active_session = crud.get_active_session_by_job(db, job_id)
         if active_session and active_session.cdp_ws_url:
