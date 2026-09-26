@@ -532,12 +532,7 @@ def admin_list_workers(current_admin: models.User = Depends(get_current_admin_us
 # --- WEBSOCKET CHANNELS ---
 
 @app.websocket("/api/ws/dashboard")
-async def ws_dashboard(websocket: WebSocket, token: str = None, db: Session = Depends(get_db)):
-    # Authenticate socket
-    if not token:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-        return
-        
+async def ws_dashboard(websocket: WebSocket, token: Optional[str] = None, db: Session = Depends(get_db)):
     user = get_ws_user(token, db)
     if not user:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
@@ -560,12 +555,7 @@ async def ws_dashboard(websocket: WebSocket, token: str = None, db: Session = De
 
 
 @app.websocket("/api/ws/browser/{job_id}")
-async def ws_browser(websocket: WebSocket, job_id: int, token: str = None, db: Session = Depends(get_db)):
-    # Authenticate socket
-    if not token:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-        return
-        
+async def ws_browser(websocket: WebSocket, job_id: int, token: Optional[str] = None, db: Session = Depends(get_db)):
     user = get_ws_user(token, db)
     if not user:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)

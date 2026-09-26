@@ -1,5 +1,13 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { apiFetch, setTokens, clearTokens, User } from '../utils/api';
+import { apiFetch, User } from '../utils/api';
+
+const DEFAULT_USER: User = {
+  id: 1,
+  email: 'hnabeel3@gmail.com',
+  role: 'admin',
+  is_suspended: false,
+  created_at: new Date().toISOString()
+};
 
 interface AuthContextType {
   user: User | null;
@@ -13,16 +21,19 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [user, setUser] = useState<User | null>(DEFAULT_USER);
+  const [loading, setLoading] = useState<boolean>(false);
 
   const refreshUser = async () => {
     try {
       const data = await apiFetch('/auth/me');
-      setUser(data);
-    } catch (err) {
-      setUser(null);
-      clearTokens();
+      if (data && data.email) {
+        setUser(data);
+      } else {
+        setUser(DEFAULT_USER);
+      }
+    } catch {
+      setUser(DEFAULT_USER);
     } finally {
       setLoading(false);
     }
@@ -32,41 +43,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     refreshUser();
   }, []);
 
-  const login = async (email: string, password: string) => {
-    setLoading(true);
-    try {
-      const data = await apiFetch('/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({ email, password }),
-      });
-      setTokens(data.access_token, data.refresh_token);
-      await refreshUser();
-    } catch (err) {
-      setLoading(false);
-      throw err;
-    }
-  };
-
-  const register = async (email: string, password: string) => {
-    setLoading(true);
-    try {
-      await apiFetch('/auth/register', {
-        method: 'POST',
-        body: JSON.stringify({ email, password }),
-      });
-      // Automatically log in after registration
-      await login(email, password);
-    } catch (err) {
-      setLoading(false);
-      throw err;
-    }
-  };
-
-  const logout = () => {
-    clearTokens();
-    setUser(null);
-    window.location.href = '/login';
-  };
+  const login = async () => {};
+  const register = async () => {};
+  const logout = () => {};
 
   return (
     <AuthContext.Provider value={{ user, loading, login, register, logout, refreshUser }}>

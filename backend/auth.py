@@ -8,6 +8,7 @@ from config import settings
 from database import get_db
 import crud
 import models
+import schemas
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login", auto_error=False)
 
@@ -54,28 +55,27 @@ def verify_token(token: str, expected_type: str = "access") -> dict:
         )
 
 def get_current_user(token: Optional[str] = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> models.User:
-    if not token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    payload = verify_token(token, "access")
-    email: str = payload.get("sub")
-    if email is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-        )
-    
-    user = crud.get_user_by_email(db, email=email)
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
-    if user.is_suspended:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is suspended")
-    
-    return user
+    if token:
+        try:
+            payload = verify_token(token, "access")
+            email: str = payload.get("sub")
+            if email:
+                user = crud.get_user_by_email(db, email=email)
+                if user and not user.is_suspended:
+                    return user
+        except Exception:
+            pass
+
+    # Auto-login fallback when sign in / sign up is removed
+    admin_user = crud.get_user_by_email(db, email="hnabeel3@gmail.com")
+    if not admin_user:
+        admin_user = db.query(models.User).filter(models.User.role == "admin").first()
+    if not admin_user:
+        admin_user = db.query(models.User).first()
+    if not admin_user:
+        admin_user = crud.create_user(db, schemas.UserCreate(email="hnabeel3@gmail.com", password="AdminPassword123!"))
+        crud.update_user_role(db, user_id=admin_user.id, role="admin")
+    return admin_user
 
 def get_current_admin_user(current_user: models.User = Depends(get_current_user)) -> models.User:
     if current_user.role != "admin":
@@ -86,17 +86,22 @@ def get_current_admin_user(current_user: models.User = Depends(get_current_user)
     return current_user
 
 # Socket Auth helper
-def get_ws_user(token: str, db: Session) -> Optional[models.User]:
-    try:
-        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
-        if payload.get("type") != "access":
-            return None
-        email = payload.get("sub")
-        if not email:
-            return None
-        user = crud.get_user_by_email(db, email=email)
-        if user and not user.is_suspended:
-            return user
-    except Exception:
-        pass
-    return None
+def get_ws_user(token: Optional[str], db: Session) -> Optional[models.User]:
+    if token:
+        try:
+            payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+            if payload.get("type") == "access":
+                email = payload.get("sub")
+                if email:
+                    user = crud.get_user_by_email(db, email=email)
+                    if user and not user.is_suspended:
+                        return user
+        except Exception:
+            pass
+    # Auto-login fallback
+    admin_user = crud.get_user_by_email(db, email="hnabeel3@gmail.com")
+    if not admin_user:
+        admin_user = db.query(models.User).filter(models.User.role == "admin").first()
+    if not admin_user:
+        admin_user = db.query(models.User).first()
+    return admin_user

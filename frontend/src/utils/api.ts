@@ -150,13 +150,11 @@ export async function apiFetch(path: string, options: RequestInit = {}): Promise
         } else {
           clearTokens();
           isRefreshing = false;
-          window.location.href = '/login';
           throw new Error('Session expired');
         }
       } catch (err) {
         clearTokens();
         isRefreshing = false;
-        window.location.href = '/login';
         throw err;
       }
     }

@@ -5,7 +5,6 @@ import {
   LayoutDashboard, 
   Settings, 
   ShieldAlert, 
-  LogOut, 
   Menu, 
   X, 
   Globe 
@@ -16,7 +15,7 @@ interface LayoutProps {
 }
 
 export const Layout: React.FC<LayoutProps> = ({ children }) => {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
 
@@ -85,22 +84,16 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           </nav>
         </div>
 
-        <div className="flex flex-col gap-4 border-t border-zinc-800/60 pt-4">
-          <div className="px-2 py-1.5">
-            <p className="text-xs text-zinc-500">Logged in as</p>
-            <p className="text-sm font-medium text-zinc-300 truncate">{user?.email}</p>
-            <span className={`inline-block text-[10px] uppercase font-bold tracking-wide mt-1 px-1.5 py-0.5 rounded-full ${user?.role === 'admin' ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-green-500/20 text-green-400 border border-green-500/30'}`}>
-              {user?.role}
+        <div className="flex flex-col gap-2 border-t border-zinc-800/60 pt-4">
+          <div className="px-3 py-2 rounded-lg bg-zinc-900/60 border border-zinc-800/60 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span className="text-xs font-semibold text-zinc-300">System Ready</span>
+            </div>
+            <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
+              Admin
             </span>
           </div>
-
-          <button
-            onClick={logout}
-            className="flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium text-red-400 hover:bg-red-950/20 hover:text-red-300 border border-transparent hover:border-red-900/30 transition-all duration-200"
-          >
-            <LogOut size={18} />
-            Sign Out
-          </button>
         </div>
       </aside>
 
