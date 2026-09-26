@@ -1,6 +1,5 @@
 import asyncio
 import os
-import time
 import socket
 import logging
 import requests
@@ -409,19 +408,42 @@ async def async_run_monitoring_job(job_id: int):
                         break
 
                     logger.info(f"Navigating to {job.target_url} (Attempt {retries+1}/{job.max_retries})")
-                    response = await page.goto(job.target_url, timeout=job.timeout * 1000)
+                    try:
+                        response = await page.goto(job.target_url, wait_until="domcontentloaded", timeout=job.timeout * 1000)
+                    except Exception as goto_err:
+                        logger.warning(f"Navigation to {job.target_url} notice: {goto_err}")
+                        response = None
                     
                     # Check if navigation redirected to registration page
-                    if "/register" in page.url:
-                        logger.info(f"Redirected to registration page: {page.url}. Freezing navigation.")
+                    current_url = page.url
+                    if "/register" in current_url:
+                        logger.info(f"Reached registration page: {current_url}. Freezing navigation.")
                         success = True
-                        status_msg = f"Reached registration page: {page.url}"
+                        status_msg = f"Reached registration page: {current_url}"
                         break
+
+                    # If placed in queue / waiting room, poll every 3s for queue exit
+                    if "waiting" in current_url or "wait" in current_url:
+                        logger.info(f"Browser placed in queue at {current_url}. Actively monitoring queue progression every 3s...")
+                        poll_duration = min(job.refresh_interval, 60)
+                        for _ in range(max(1, poll_duration // 3)):
+                            await asyncio.sleep(3)
+                            chk_url = page.url
+                            if "/register" in chk_url:
+                                logger.info(f"Queue passed! Reached registration page: {chk_url}")
+                                success = True
+                                status_msg = f"Queue passed -> {chk_url}"
+                                break
+                            if "waiting" not in chk_url and "wait" not in chk_url:
+                                logger.info(f"Redirected out of queue to: {chk_url}")
+                                break
+                        if success:
+                            break
 
                     # Evaluate conditions
                     conditions_met = []
                     
-                    if job.expected_http_response is not None:
+                    if job.expected_http_response is not None and response is not None:
                         status_match = response.status == job.expected_http_response
                         conditions_met.append(status_match)
                         logger.info(f"HTTP Response check: {response.status} vs {job.expected_http_response} (Match: {status_match})")
@@ -472,25 +494,7 @@ async def async_run_monitoring_job(job_id: int):
                         status_msg = f"Failed after maximum retries: {str(e)}"
                         break
                         
-                # Wait for next check interval, polling frequently in 3s slices to detect when queue passes
-                sleep_remaining = job.refresh_interval
-                while sleep_remaining > 0:
-                    step = min(sleep_remaining, 3)
-                    await asyncio.sleep(step)
-                    sleep_remaining -= step
-                    
-                    db.refresh(job)
-                    if job.status != "active":
-                        break
-                        
-                    current_url = page.url
-                    if "/register" in current_url:
-                        logger.info(f"Detected auto-redirect to registration page: {current_url}. Freezing session.")
-                        success = True
-                        status_msg = f"Reached registration page: {current_url}"
-                        break
-                if success or job.status != "active":
-                    break
+                await asyncio.sleep(job.refresh_interval)
                 
             # Post-loop checks
             if success:

@@ -7,6 +7,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sessionsecretpassword123}
       POSTGRES_DB: ${POSTGRES_DB:-session_reserve}
+    command: postgres -c max_connections=250
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -55,7 +56,7 @@ services:
       - REFRESH_TOKEN_EXPIRE_MINUTES=${REFRESH_TOKEN_EXPIRE_MINUTES:-10080}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
       - GUNICORN_WORKERS=${GUNICORN_WORKERS:-4}
-      - MAX_WORKERS=${MAX_WORKERS:-5}
+      - MAX_WORKERS=${MAX_WORKERS:-100}
       - SCREENSHOTS_DIR=/app/shared/screenshots
       - PROFILES_DIR=/app/shared/browser-profiles
       - WORKER_HOST=worker
@@ -89,21 +90,16 @@ services:
     container_name: session_reserve_worker
     restart: unless-stopped
     ipc: host # Shared memory for Chromium headless stability
-    shm_size: '2gb'
+    shm_size: '4gb'
     environment:
       - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:sessionsecretpassword123@postgres:5432/session_reserve}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
-      - CELERY_CONCURRENCY=${CELERY_CONCURRENCY:-4}
-      - MAX_WORKERS=${MAX_WORKERS:-5}
+      - CELERY_CONCURRENCY=${CELERY_CONCURRENCY:-100}
+      - MAX_WORKERS=${MAX_WORKERS:-100}
       - SCREENSHOTS_DIR=/app/shared/screenshots
       - PROFILES_DIR=/app/shared/browser-profiles
     volumes:
       - shared_data:/app/shared
-      - ./worker/worker.py:/app/worker.py
-      - ./backend/database.py:/app/database.py
-      - ./backend/models.py:/app/models.py
-      - ./backend/crud.py:/app/crud.py
-      - ./backend/schemas.py:/app/schemas.py
       - ./hajj-session-queue-assistant:/app/hajj-session-queue-assistant:ro
     depends_on:
       postgres:

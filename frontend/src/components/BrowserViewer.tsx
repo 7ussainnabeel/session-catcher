@@ -138,13 +138,6 @@ export const BrowserViewer: React.FC<BrowserViewerProps> = ({ jobId, jobName, on
 
         // Handle error message from backend proxy
         if (parsed.error) {
-          if (parsed.error.toLowerCase().includes('starting up') || parsed.error.toLowerCase().includes('initialize')) {
-            // Browser container is spinning up, keep loading spinner and auto-reconnect
-            setTimeout(() => {
-              connectWebSocket();
-            }, 2500);
-            return;
-          }
           setErrorMsg(parsed.error);
           setStatus('error');
           return;
