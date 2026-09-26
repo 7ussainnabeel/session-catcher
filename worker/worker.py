@@ -438,7 +438,14 @@ async def async_run_monitoring_job(job_id: int):
                         
                     if job.expected_text:
                         body_text = await page.inner_text("body")
-                        text_match = job.expected_text in body_text
+                        if " or " in job.expected_text:
+                            options = [t.strip() for t in job.expected_text.split(" or ") if t.strip()]
+                            text_match = any(opt in body_text for opt in options)
+                        elif " أو " in job.expected_text:
+                            options = [t.strip() for t in job.expected_text.split(" أو ") if t.strip()]
+                            text_match = any(opt in body_text for opt in options)
+                        else:
+                            text_match = job.expected_text in body_text
                         conditions_met.append(text_match)
                         logger.info(f"Text check: body containing '{job.expected_text}' (Match: {text_match})")
                         

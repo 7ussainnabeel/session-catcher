@@ -19,6 +19,7 @@ import {
   Download,
   ShieldCheck,
   Search,
+  SlidersHorizontal,
   X
 } from 'lucide-react';
 
@@ -32,18 +33,18 @@ export const Dashboard: React.FC = () => {
   const [activeJobId, setActiveJobId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   
-  // Recommended Default Job Configuration
+  // Recommended Default Job Configuration matching user's photo
   const DEFAULT_JOB_CONFIG = {
     name: 'Hajj Platform Registration',
-    targetUrl: 'https://haj.gov.bh/home',
-    interval: 15,
+    targetUrl: 'https://haj.gov.bh/register/bahraini',
+    interval: 86400,
     maxRetries: 100,
     timeout: 30,
-    expectedText: '',
+    expectedText: 'بدء التسجيل or تقديم طلب التسجيل',
     expectedElement: 'a[href*="/register"]',
     expectedTitle: 'نظام تسجيل الحج',
-    expectedUrl: '',
-    expectedStatus: '' as number | '',
+    expectedUrl: '/booking-confirmed',
+    expectedStatus: 200 as number | '',
   };
 
   // Create Job Form State with Recommended Defaults
@@ -154,11 +155,40 @@ export const Dashboard: React.FC = () => {
     };
   }, []);
 
+  const handleDirectCreateJob = async () => {
+    setCreating(true);
+    try {
+      const created = await apiFetch('/jobs', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: DEFAULT_JOB_CONFIG.name,
+          target_url: DEFAULT_JOB_CONFIG.targetUrl,
+          refresh_interval: Number(DEFAULT_JOB_CONFIG.interval),
+          expected_text: DEFAULT_JOB_CONFIG.expectedText,
+          expected_element: DEFAULT_JOB_CONFIG.expectedElement,
+          expected_title: DEFAULT_JOB_CONFIG.expectedTitle,
+          expected_url: DEFAULT_JOB_CONFIG.expectedUrl,
+          expected_http_response: Number(DEFAULT_JOB_CONFIG.expectedStatus),
+          max_retries: Number(DEFAULT_JOB_CONFIG.maxRetries),
+          timeout: Number(DEFAULT_JOB_CONFIG.timeout),
+        }),
+      });
+      await fetchDashboardData();
+      if (created && created.id) {
+        setActiveJobId(created.id);
+      }
+    } catch (err: any) {
+      alert(err.message || 'Failed to create monitoring session');
+    } finally {
+      setCreating(false);
+    }
+  };
+
   const handleCreateJob = async (e: React.FormEvent) => {
     e.preventDefault();
     setCreating(true);
     try {
-      await apiFetch('/jobs', {
+      const created = await apiFetch('/jobs', {
         method: 'POST',
         body: JSON.stringify({
           name: jobName,
@@ -175,7 +205,10 @@ export const Dashboard: React.FC = () => {
       });
       setShowCreateModal(false);
       resetToRecommendedDefaults();
-      fetchDashboardData();
+      await fetchDashboardData();
+      if (created && created.id) {
+        setActiveJobId(created.id);
+      }
     } catch (err: any) {
       alert(err.message || 'Failed to create job');
     } finally {
@@ -225,14 +258,14 @@ export const Dashboard: React.FC = () => {
           <p className="text-sm text-zinc-400">Manage persistent session checkers, remote browser reserves, and extension telemetry.</p>
         </div>
         
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
           <button
             onClick={() => setShowExtensionModal(true)}
             className="glass-button-secondary px-3.5 py-2.5 flex items-center justify-center gap-2 text-xs font-semibold"
             title="Download & configure the Chrome/Edge extension"
           >
             <Puzzle size={15} className="text-cyan-400" />
-            Browser Extension
+            <span className="hidden sm:inline">Browser Extension</span>
           </button>
 
           <button
@@ -240,9 +273,20 @@ export const Dashboard: React.FC = () => {
               resetToRecommendedDefaults();
               setShowCreateModal(true);
             }}
-            className="glass-button px-4 py-2.5 flex items-center justify-center gap-2 text-sm"
+            className="glass-button-secondary px-3 py-2.5 flex items-center justify-center gap-1.5 text-xs font-semibold"
+            title="Open configuration modal to customize parameters"
           >
-            <Plus size={16} />
+            <SlidersHorizontal size={14} />
+            <span className="hidden sm:inline">Configure</span>
+          </button>
+
+          <button
+            onClick={handleDirectCreateJob}
+            disabled={creating}
+            className="glass-button px-4 py-2.5 flex items-center justify-center gap-2 text-sm font-semibold shadow-lg shadow-blue-500/20"
+            title="Directly launch a new session with Hajj Platform Registration preset"
+          >
+            {creating ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
             New Monitoring Job
           </button>
         </div>
