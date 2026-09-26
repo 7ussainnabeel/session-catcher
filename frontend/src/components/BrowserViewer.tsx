@@ -286,20 +286,34 @@ export const BrowserViewer: React.FC<BrowserViewerProps> = ({ jobId, jobName, on
     });
   };
 
-  // Mouse wheel scroll handler (allows scrolling through OTP dialogs and long pages)
-  const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
-    if (status !== 'connected') return;
-    e.preventDefault();
-    const { x, y } = getCanvasCoordinates(e);
+  // Mouse wheel scroll handler (non-passive native listener to prevent native page scroll and allow e.preventDefault())
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || status !== 'connected') return;
 
-    sendCdp('Input.dispatchMouseEvent', {
-      type: 'mouseWheel',
-      x,
-      y,
-      deltaX: e.deltaX,
-      deltaY: e.deltaY
-    });
-  };
+    const handleWheelNative = (e: WheelEvent) => {
+      e.preventDefault();
+
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = VIEWPORT_WIDTH / rect.width;
+      const scaleY = VIEWPORT_HEIGHT / rect.height;
+      const x = Math.round((e.clientX - rect.left) * scaleX);
+      const y = Math.round((e.clientY - rect.top) * scaleY);
+
+      sendCdp('Input.dispatchMouseEvent', {
+        type: 'mouseWheel',
+        x,
+        y,
+        deltaX: e.deltaX,
+        deltaY: e.deltaY
+      });
+    };
+
+    canvas.addEventListener('wheel', handleWheelNative, { passive: false });
+    return () => {
+      canvas.removeEventListener('wheel', handleWheelNative);
+    };
+  }, [status, sendCdp]);
 
   // Key Down & Single Character typing handler (eliminates double typing bug)
   const handleKeyDown = (e: React.KeyboardEvent<HTMLCanvasElement>) => {
@@ -598,7 +612,6 @@ export const BrowserViewer: React.FC<BrowserViewerProps> = ({ jobId, jobName, on
                 onMouseDown={handleMouseDown}
                 onMouseUp={handleMouseUp}
                 onMouseMove={handleMouseMove}
-                onWheel={handleWheel}
                 onKeyDown={handleKeyDown}
                 onPaste={handlePaste}
                 onContextMenu={(e) => e.preventDefault()}

@@ -18,6 +18,7 @@ import {
   Puzzle,
   Download,
   ShieldCheck,
+  Search,
   X
 } from 'lucide-react';
 
@@ -29,6 +30,7 @@ export const Dashboard: React.FC = () => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showExtensionModal, setShowExtensionModal] = useState(false);
   const [activeJobId, setActiveJobId] = useState<number | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
   
   // Recommended Default Job Configuration
   const DEFAULT_JOB_CONFIG = {
@@ -94,6 +96,8 @@ export const Dashboard: React.FC = () => {
     let pingInterval: any = null;
     let isUnmounted = false;
 
+    let retryAttempt = 0;
+
     const connectWebSocket = () => {
       if (isUnmounted) return;
       const token = getAccessToken();
@@ -104,6 +108,7 @@ export const Dashboard: React.FC = () => {
       ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
+        retryAttempt = 0;
         // Send periodic heartbeat ping every 25s
         pingInterval = setInterval(() => {
           if (ws && ws.readyState === WebSocket.OPEN) {
@@ -128,7 +133,9 @@ export const Dashboard: React.FC = () => {
       ws.onclose = () => {
         if (pingInterval) clearInterval(pingInterval);
         if (!isUnmounted) {
-          reconnectTimeout = setTimeout(connectWebSocket, 3000);
+          const delay = Math.min(3000 * Math.pow(1.5, retryAttempt), 15000);
+          retryAttempt++;
+          reconnectTimeout = setTimeout(connectWebSocket, delay);
         }
       };
 
@@ -270,8 +277,34 @@ export const Dashboard: React.FC = () => {
 
       {/* Main Monitoring Jobs List */}
       <div className="glass-panel bg-zinc-950/30 border border-zinc-800/80 overflow-hidden">
-        <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/20">
-          <h2 className="text-lg font-bold text-zinc-100">Monitoring Engines</h2>
+        <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <h2 className="text-lg font-bold text-zinc-100">Monitoring Engines</h2>
+            <span className="text-xs px-2.5 py-0.5 rounded-full bg-zinc-800 border border-zinc-700/60 text-zinc-400 font-mono">
+              {jobs.filter(j => !searchQuery.trim() || j.name.toLowerCase().includes(searchQuery.toLowerCase()) || j.target_url.toLowerCase().includes(searchQuery.toLowerCase()) || j.status.toLowerCase().includes(searchQuery.toLowerCase()) || j.id.toString().includes(searchQuery.toLowerCase())).length} of {jobs.length}
+            </span>
+          </div>
+
+          {/* Search bar above the list */}
+          <div className="relative w-full sm:w-72">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" size={14} />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search by name, URL, or status..."
+              className="w-full pl-9 pr-8 py-1.5 rounded-lg bg-zinc-900 border border-zinc-700 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-200 p-0.5 rounded transition-colors"
+                title="Clear search"
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
         </div>
 
         {loading ? (
@@ -282,11 +315,22 @@ export const Dashboard: React.FC = () => {
           <div className="text-center py-16 text-zinc-500 text-sm">
             No monitoring jobs configured. Click "New Monitoring Job" to get started.
           </div>
+        ) : jobs.filter(j => !searchQuery.trim() || j.name.toLowerCase().includes(searchQuery.toLowerCase()) || j.target_url.toLowerCase().includes(searchQuery.toLowerCase()) || j.status.toLowerCase().includes(searchQuery.toLowerCase()) || j.id.toString().includes(searchQuery.toLowerCase())).length === 0 ? (
+          <div className="text-center py-16 text-zinc-500 text-sm flex flex-col items-center gap-2">
+            <p>No monitoring engines match "{searchQuery}"</p>
+            <button
+              onClick={() => setSearchQuery('')}
+              className="text-xs text-blue-400 hover:text-blue-300 underline"
+            >
+              Clear search filter
+            </button>
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b border-zinc-800 text-xs text-zinc-400 uppercase font-semibold bg-zinc-900/10">
+                  <th className="w-14 px-4 py-3.5 text-center">#</th>
                   <th className="px-6 py-3.5">Name</th>
                   <th className="px-6 py-3.5">Target URL</th>
                   <th className="px-6 py-3.5">Interval</th>
@@ -295,8 +339,13 @@ export const Dashboard: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800/60 text-sm">
-                {jobs.map((job) => (
+                {jobs
+                  .filter(j => !searchQuery.trim() || j.name.toLowerCase().includes(searchQuery.toLowerCase()) || j.target_url.toLowerCase().includes(searchQuery.toLowerCase()) || j.status.toLowerCase().includes(searchQuery.toLowerCase()) || j.id.toString().includes(searchQuery.toLowerCase()))
+                  .map((job, index) => (
                   <tr key={job.id} className="hover:bg-zinc-900/10 transition-colors">
+                    <td className="w-14 px-4 py-4 text-center font-mono text-xs text-zinc-500 font-medium">
+                      {index + 1}
+                    </td>
                     <td className="px-6 py-4 font-medium text-zinc-200">{job.name}</td>
                     <td className="px-6 py-4 text-zinc-400 max-w-xs truncate" title={job.target_url}>
                       {job.target_url}
