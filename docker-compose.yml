@@ -89,6 +89,8 @@ services:
       dockerfile: worker/Dockerfile
     container_name: session_reserve_worker
     restart: unless-stopped
+    init: true
+    stop_grace_period: 10s
     ipc: host # Shared memory for Chromium headless stability
     shm_size: '4gb'
     environment:

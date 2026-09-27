@@ -5,10 +5,13 @@
   ],
   "extraPaths": [
     "./backend",
-    "./worker"
+    "./worker",
+    "./.venv/lib/python3.9/site-packages",
+    "/Users/7ussain_nabeel/CodingProjects/Github/session-catcher/.venv/lib/python3.9/site-packages"
   ],
-  "venvPath": ".",
+  "venvPath": "/Users/7ussain_nabeel/CodingProjects/Github/session-catcher",
   "venv": ".venv",
+  "pythonPath": "/Users/7ussain_nabeel/CodingProjects/Github/session-catcher/.venv/bin/python",
   "reportMissingImports": "none",
   "reportMissingModuleSource": "none"
 }
