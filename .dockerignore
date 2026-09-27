@@ -1,0 +1,34 @@
+# Git and system files
+.git
+.gitignore
+.dockerignore
+.DS_Store
+
+# Core dumps and crash reports
+core
+core.*
+*.core
+vgcore.*
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# Shared volumes and runtime data
+shared/
+shared_data/
+browser-profiles/
+screenshots/
+*.log
+
+# Node dependencies and build
+node_modules/
+dist/
+.env
+.env.*

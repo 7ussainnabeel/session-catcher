@@ -1,0 +1,23 @@
+# Core dumps and crash reports
+core
+core.*
+*.core
+vgcore.*
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Shared runtime directories
+shared/
+browser-profiles/
+screenshots/
+*.log
+
+# Git and OS
+.git
+.gitignore
+.dockerignore
+.DS_Store
