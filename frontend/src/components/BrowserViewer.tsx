@@ -132,6 +132,9 @@ export const BrowserViewer: React.FC<BrowserViewerProps> = ({ jobId, jobName, on
 
       // 4. Request current page URL
       socket.send(JSON.stringify({ id: nextId(), method: 'Page.getNavigationHistory' }));
+
+      // 5. Force immediate screenshot render so live view paints instantly on open
+      socket.send(JSON.stringify({ id: nextId(), method: 'Page.captureScreenshot', params: { format: 'jpeg', quality: 80 } }));
     };
 
     socket.onmessage = (event) => {
@@ -157,6 +160,11 @@ export const BrowserViewer: React.FC<BrowserViewerProps> = ({ jobId, jobName, on
           }));
 
           renderFrame(data);
+        }
+
+        // Immediate snapshot response from Page.captureScreenshot
+        if (parsed.result?.data && typeof parsed.result.data === 'string' && !parsed.result.entries) {
+          renderFrame(parsed.result.data);
         }
 
         // Page navigation events

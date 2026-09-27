@@ -583,49 +583,51 @@ async def ws_browser(websocket: WebSocket, job_id: int, token: Optional[str] = N
     
     # Retrieve browser WS debug URL
     cdp_url = None
-    active_session = None
-    worker = None
+    active_session = crud.get_active_session_by_job(db, job_id)
+    if active_session and active_session.cdp_ws_url:
+        cdp_url = active_session.cdp_ws_url
     
-    for attempt in range(40): # Wait up to 20s for browser to initialize
-        db.expire_all()
-        worker = db.query(models.Worker).filter(models.Worker.current_job_id == job_id, models.Worker.status.in_(["assigned", "monitoring", "reserved"])).first()
-        if not worker:
-            worker = db.query(models.Worker).filter(models.Worker.current_job_id == job_id).first()
+    if not cdp_url and worker and worker.browser_ws_url:
+        cdp_url = worker.browser_ws_url
 
-        if worker and worker.port:
-            try:
-                query_host = worker.host or settings.WORKER_HOST or "worker"
-                url = f"http://{query_host}:{worker.port}/json"
-                req = urllib.request.Request(url, headers={"Host": "localhost"})
-                with urllib.request.urlopen(req, timeout=1.5) as resp:
-                    targets = json.loads(resp.read().decode())
-                    for t in targets:
-                        if t.get("type") == "page" and t.get("webSocketDebuggerUrl"):
-                            cdp_url = t.get("webSocketDebuggerUrl")
-                            break
-                        elif t.get("webSocketDebuggerUrl"):
-                            cdp_url = t.get("webSocketDebuggerUrl")
-                if cdp_url:
-                    worker.browser_ws_url = cdp_url
-                    db.commit()
-                    break
-            except Exception as e:
-                # If worker port is dead and not already dispatched, clear stale URL and dispatch job
-                logger.debug(f"Worker {worker.id} on port {worker.port} not responding to /json ({e}).")
-                if not task_dispatched:
-                    celery_app.send_task("worker.run_monitoring_job", args=[job_id])
-                    task_dispatched = True
+    # If not immediately found in DB, poll worker CDP port
+    if not cdp_url:
+        for attempt in range(30): # Wait up to 15s for browser to initialize
+            db.expire_all()
+            worker = db.query(models.Worker).filter(models.Worker.current_job_id == job_id, models.Worker.status.in_(["assigned", "monitoring", "reserved"])).first()
+            if not worker:
+                worker = db.query(models.Worker).filter(models.Worker.current_job_id == job_id).first()
 
-        active_session = crud.get_active_session_by_job(db, job_id)
-        if active_session and active_session.cdp_ws_url:
-            cdp_url = active_session.cdp_ws_url
-            break
-                
-        await asyncio.sleep(0.5)
+            if worker and worker.port:
+                try:
+                    query_host = worker.host or settings.WORKER_HOST or "worker"
+                    url = f"http://{query_host}:{worker.port}/json"
+                    req = urllib.request.Request(url, headers={"Host": "localhost"})
+                    with urllib.request.urlopen(req, timeout=1.5) as resp:
+                        targets = json.loads(resp.read().decode())
+                        for t in targets:
+                            if t.get("type") == "page" and t.get("webSocketDebuggerUrl"):
+                                cdp_url = t.get("webSocketDebuggerUrl")
+                                break
+                            elif t.get("webSocketDebuggerUrl"):
+                                cdp_url = t.get("webSocketDebuggerUrl")
+                    if cdp_url:
+                        worker.browser_ws_url = cdp_url
+                        db.commit()
+                        break
+                except Exception as e:
+                    logger.debug(f"Waiting for worker {worker.id} port {worker.port}: {e}")
+
+            active_session = crud.get_active_session_by_job(db, job_id)
+            if active_session and active_session.cdp_ws_url:
+                cdp_url = active_session.cdp_ws_url
+                break
+                    
+            await asyncio.sleep(0.5)
 
     if not cdp_url:
         logger.error(f"No active CDP debug session found for job {job_id}")
-        await websocket.send_json({"error": "Browser is starting up. Please click Live View again in a few seconds."})
+        await websocket.send_json({"error": "Browser engine is initializing in background. Please click Live View again in a few seconds."})
         await websocket.close(code=status.WS_1000_NORMAL_CLOSURE)
         return
     
@@ -648,9 +650,4 @@ async def ws_browser(websocket: WebSocket, job_id: int, token: Optional[str] = N
     try:
         await CDPProxyManager.proxy_cdp(websocket, cdp_url)
     except Exception as e:
-        logger.error(f"CDP connection ended for job {job_id}: {e}")
-        if active_session:
-            active_session.status = "closed"
-            active_session.closed_at = datetime.utcnow()
-            db.commit()
-            crud.log_activity(db, f"CDP session {active_session.id} for job {job_id} closed: {e}", "warning", user_id=user.id, job_id=job_id)
+        logger.info(f"CDP viewer disconnected for job {job_id}: {e}. Background monitor remains active and running.")

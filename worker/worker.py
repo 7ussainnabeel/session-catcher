@@ -470,11 +470,14 @@ async def async_run_monitoring_job(job_id: int):
                         status_msg = f"Reached registration page: {current_url}"
                         break
 
-                    # If placed in queue / waiting room, poll every 3s for queue exit
+                    # If placed in queue / waiting room, poll continuously every 3s until queue passes
                     if "waiting" in current_url or "wait" in current_url:
                         logger.info(f"Browser placed in queue at {current_url}. Actively monitoring queue progression every 3s...")
-                        poll_duration = min(job.refresh_interval, 60)
-                        for _ in range(max(1, poll_duration // 3)):
+                        while "waiting" in page.url or "wait" in page.url:
+                            db.refresh(job)
+                            if job.status != "active":
+                                logger.info(f"Job {job_id} paused/stopped by user while in queue.")
+                                break
                             await asyncio.sleep(3)
                             chk_url = page.url
                             if "/register" in chk_url:
@@ -570,7 +573,9 @@ async def async_run_monitoring_job(job_id: int):
                         status_msg = f"Failed after maximum retries: {str(e)}"
                         break
                         
-                await asyncio.sleep(job.refresh_interval)
+                # Active monitor sleep between ticks (max 5s) so background checks remain responsive
+                sleep_time = min(job.refresh_interval, 5) if job.refresh_interval > 0 else 3
+                await asyncio.sleep(sleep_time)
                 
             # Post-loop checks
             if success:
@@ -635,15 +640,20 @@ async def async_run_monitoring_job(job_id: int):
                     photo_path=screenshot_path
                 )
                 
-                # Enter wait/hold loop - keep browser active and alive without reloading the page
+                # Enter wait/hold loop - keep browser active and alive indefinitely in background
                 logger.info("Entering session hold loop. Page is kept open and form inputs preserved...")
                 last_keepalive_time = time.time()
                 while True:
-                    db.refresh(db_session)
                     db.refresh(job)
-                    if db_session.status != "active" or job.status != "success":
-                        logger.info("Session closed by server/user. Tearing down browser...")
+                    if job.status not in ["success", "active"]:
+                        logger.info(f"Job status changed to {job.status}. Tearing down browser...")
                         break
+                    
+                    if db_session:
+                        db.refresh(db_session)
+                        if db_session.status == "deleted":
+                            logger.info("Session explicitly deleted by user. Tearing down browser...")
+                            break
                     
                     # Background keep-alive heartbeat every 2 minutes without full page reload
                     now = time.time()
@@ -660,7 +670,7 @@ async def async_run_monitoring_job(job_id: int):
                         except Exception as e:
                             logger.debug(f"Keep-alive heartbeat notice: {e}")
 
-                    await asyncio.sleep(5)
+                    await asyncio.sleep(3)
                     
             else:
                 # Job finished with failure/limit reached
