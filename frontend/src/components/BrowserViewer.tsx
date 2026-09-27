@@ -97,7 +97,9 @@ export const BrowserViewer: React.FC<BrowserViewerProps> = ({ jobId, jobName, on
 
   const connectWebSocket = useCallback(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/api/ws/browser/${jobId}?token=${getAccessToken()}`;
+    const token = getAccessToken();
+    const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
+    const wsUrl = `${protocol}//${window.location.host}/api/ws/browser/${jobId}${tokenParam}`;
 
     setStatus('connecting');
     setErrorMsg('');

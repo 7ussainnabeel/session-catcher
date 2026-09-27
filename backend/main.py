@@ -556,21 +556,24 @@ async def ws_dashboard(websocket: WebSocket, token: Optional[str] = None, db: Se
 
 @app.websocket("/api/ws/browser/{job_id}")
 async def ws_browser(websocket: WebSocket, job_id: int, token: Optional[str] = None, db: Session = Depends(get_db)):
+    # Accept the client websocket connection first so connection handshake completes cleanly
+    await websocket.accept()
+    
     user = get_ws_user(token, db)
     if not user:
+        await websocket.send_json({"error": "Unauthorized"})
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
     
     # Fetch job and check permissions
     db_job = crud.get_job(db, job_id)
     if not db_job or (db_job.user_id != user.id and user.role != "admin"):
+        await websocket.send_json({"error": "Job not found or permission denied"})
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
         
-    # Accept the client websocket connection first so connection is established
-    await websocket.accept()
-    
     # If no worker is currently running, auto-dispatch Celery task
+    task_dispatched = False
     worker = db.query(models.Worker).filter(models.Worker.current_job_id == job_id, models.Worker.status.in_(["assigned", "monitoring", "reserved"])).first()
     if not worker:
         if db_job.status in ["paused", "failed"]:

@@ -102,10 +102,9 @@ export const Dashboard: React.FC = () => {
     const connectWebSocket = () => {
       if (isUnmounted) return;
       const token = getAccessToken();
-      if (!token) return;
-
+      const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/api/ws/dashboard?token=${token}`;
+      const wsUrl = `${protocol}//${window.location.host}/api/ws/dashboard${tokenParam}`;
       ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {

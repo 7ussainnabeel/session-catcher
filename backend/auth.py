@@ -87,7 +87,7 @@ def get_current_admin_user(current_user: models.User = Depends(get_current_user)
 
 # Socket Auth helper
 def get_ws_user(token: Optional[str], db: Session) -> Optional[models.User]:
-    if token:
+    if token and token.strip() not in ["null", "undefined", "None", ""]:
         try:
             payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
             if payload.get("type") == "access":
@@ -105,3 +105,4 @@ def get_ws_user(token: Optional[str], db: Session) -> Optional[models.User]:
     if not admin_user:
         admin_user = db.query(models.User).first()
     return admin_user
+
