@@ -1,0 +1,14 @@
+{
+  "include": [
+    "backend",
+    "worker"
+  ],
+  "extraPaths": [
+    "./backend",
+    "./worker"
+  ],
+  "venvPath": ".",
+  "venv": ".venv",
+  "reportMissingImports": "none",
+  "reportMissingModuleSource": "none"
+}

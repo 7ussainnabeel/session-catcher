@@ -16,10 +16,19 @@ from playwright.async_api import async_playwright
 import urllib.request
 import json
 
+import sys
+
 # Setup DB imports (sharing the backend directory structure via volume or shared codebase)
-import database
-import models
-import crud
+backend_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backend"))
+if os.path.isdir(backend_path) and backend_path not in sys.path:
+    sys.path.insert(0, backend_path)
+
+try:
+    import database
+    import models
+    import crud
+except ImportError:
+    from backend import database, models, crud  # type: ignore
 
 # Initialize logging
 logging.basicConfig(level=logging.INFO)
