@@ -189,12 +189,20 @@ def get_worker(db: Session, worker_id: int):
 
 # --- Sessions CRUD ---
 def create_session(db: Session, user_id: int, job_id: int, worker_id: int, cdp_ws_url: str):
-    # Close any existing active sessions for this job to prevent stale accumulation
-    db.query(models.Session).filter(
+    # Check if there is already an active session for this job
+    existing = db.query(models.Session).filter(
         models.Session.job_id == job_id,
         models.Session.status == "active"
-    ).update({"status": "closed", "closed_at": datetime.utcnow()})
-    
+    ).order_by(desc(models.Session.id)).first()
+
+    if existing:
+        existing.worker_id = worker_id
+        if cdp_ws_url:
+            existing.cdp_ws_url = cdp_ws_url
+        db.commit()
+        db.refresh(existing)
+        return existing
+
     db_session = models.Session(
         user_id=user_id,
         job_id=job_id,

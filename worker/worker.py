@@ -357,6 +357,19 @@ async def async_run_monitoring_job(job_id: int):
         return
         
     user_id = job.user_id
+
+    # Check if job already has an active captured session held by a running worker
+    existing_session = crud.get_active_session_by_job(db, job_id)
+    if job.status == "success" and existing_session and existing_session.cdp_ws_url:
+        existing_worker = db.query(models.Worker).filter(
+            models.Worker.current_job_id == job_id,
+            models.Worker.status == "reserved"
+        ).first()
+        if existing_worker:
+            logger.info(f"Job #{job_id} already has a live captured session (Session #{existing_session.id}, Worker #{existing_worker.id}). Preserving session without resetting!")
+            db.close()
+            return
+
     worker_pid = os.getpid()
     worker_name = f"worker_{worker_pid}"
     cdp_port = find_free_port()
@@ -450,18 +463,31 @@ async def async_run_monitoring_job(job_id: int):
             while retries < job.max_retries:
                 # Check if job was paused/deleted by client
                 db.refresh(job)
-                if job.status != "active":
+                if job.status not in ["active", "success"]:
                     logger.info(f"Job {job_id} is no longer active (status={job.status}). Exiting.")
-                    status_msg = "Job paused/stopped by user"
+                    status_msg = f"Job status is {job.status}"
+                    break
+                
+                # If job already reached success, preserve captured session and enter hold
+                if job.status == "success":
+                    logger.info(f"Job #{job_id} is already in 'success' state. Preserving captured session!")
+                    success = True
+                    status_msg = f"Preserving captured session at {page.url}"
                     break
                     
                 try:
-                    # If page is already on registration flow (e.g. user entered or queue passed), freeze navigation immediately
+                    # Check if page is already on portal/registration (queue passed or user already inside)
                     current_url = page.url
-                    if "/register" in current_url:
-                        logger.info(f"Active registration page detected at {current_url}. Freezing navigation to preserve form/session.")
+                    is_portal_url = (
+                        ("haj.gov.bh" in current_url) and 
+                        ("waiting" not in current_url) and 
+                        ("wait" not in current_url) and 
+                        (current_url != "about:blank")
+                    )
+                    if is_portal_url or "/register" in current_url:
+                        logger.info(f"Active session detected at {current_url}. Freezing navigation to preserve form/session.")
                         success = True
-                        status_msg = f"Registration page active: {current_url}"
+                        status_msg = f"Session active at {current_url}"
                         break
 
                     logger.info(f"Navigating to {job.target_url} (Attempt {retries+1}/{job.max_retries})")
@@ -471,12 +497,25 @@ async def async_run_monitoring_job(job_id: int):
                         logger.warning(f"Navigation to {job.target_url} notice: {goto_err}")
                         response = None
                     
-                    # Check if navigation redirected to registration page
+                    # Immediately check if landed directly on post-queue portal / registration
                     current_url = page.url
-                    if "/register" in current_url:
-                        logger.info(f"Reached registration page: {current_url}. Freezing navigation.")
+                    is_portal_url = (
+                        ("haj.gov.bh" in current_url) and 
+                        ("waiting" not in current_url) and 
+                        ("wait" not in current_url) and 
+                        (current_url != "about:blank")
+                    )
+                    if is_portal_url or "/register" in current_url:
+                        try:
+                            bahraini_link = page.locator('a[href*="/register/bahraini"]').first
+                            if await bahraini_link.is_visible(timeout=2000):
+                                await bahraini_link.click()
+                                await page.wait_for_timeout(2000)
+                        except Exception:
+                            pass
+                        logger.info(f"Session captured directly at {page.url}. Freezing navigation!")
                         success = True
-                        status_msg = f"Reached registration page: {current_url}"
+                        status_msg = f"Session captured at {page.url}"
                         break
 
                     # If placed in queue / waiting room, poll continuously every 3s until queue passes
@@ -484,19 +523,14 @@ async def async_run_monitoring_job(job_id: int):
                         logger.info(f"Browser placed in queue at {current_url}. Actively monitoring queue progression every 3s...")
                         while "waiting" in page.url or "wait" in page.url:
                             db.refresh(job)
-                            if job.status != "active":
+                            if job.status not in ["active", "success"]:
                                 logger.info(f"Job {job_id} paused/stopped by user while in queue.")
                                 break
                             await asyncio.sleep(3)
                             chk_url = page.url
-                            if "/register" in chk_url:
-                                logger.info(f"Queue passed! Reached registration page: {chk_url}")
-                                success = True
-                                status_msg = f"Queue passed -> {chk_url}"
-                                break
-                            if "waiting" not in chk_url and "wait" not in chk_url:
-                                logger.info(f"Redirected out of queue to: {chk_url}")
-                                # Try to click Bahraini registration link if on home portal page
+                            if "waiting" not in chk_url and "wait" not in chk_url and chk_url != "about:blank":
+                                logger.info(f"Queue passed! Redirected out of queue to: {chk_url}. Capturing session!")
+                                # If on home portal page, try to click Bahraini registration link
                                 try:
                                     bahraini_link = page.locator('a[href*="/register/bahraini"]').first
                                     if await bahraini_link.is_visible(timeout=3000):
@@ -504,9 +538,8 @@ async def async_run_monitoring_job(job_id: int):
                                         await page.wait_for_timeout(2000)
                                 except Exception:
                                     pass
-                                if "/register" in page.url:
-                                    success = True
-                                    status_msg = f"Registration page active: {page.url}"
+                                success = True
+                                status_msg = f"Queue passed & session captured at: {page.url}"
                                 break
                         if success:
                             break
